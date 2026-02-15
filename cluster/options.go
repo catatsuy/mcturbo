@@ -12,8 +12,11 @@ import (
 type Distribution uint8
 
 const (
+	// DistributionDefault uses the package default distribution.
 	DistributionDefault Distribution = iota
+	// DistributionModula maps keys by hash(key) % serverCount.
 	DistributionModula
+	// DistributionConsistent maps keys with a consistent-hash ring.
 	DistributionConsistent
 )
 
@@ -21,11 +24,15 @@ const (
 type Hash uint8
 
 const (
+	// HashDefault uses the package default hash.
 	HashDefault Hash = iota
+	// HashMD5 uses MD5-based hashing.
 	HashMD5
+	// HashCRC32 uses CRC32 hashing.
 	HashCRC32
 )
 
+// ClusterOption configures Cluster behavior.
 type ClusterOption func(*clusterConfig) error
 
 type clusterConfig struct {
@@ -48,6 +55,7 @@ func defaultClusterConfig() clusterConfig {
 	}
 }
 
+// WithBaseClientOptions applies base mcturbo options to all shard clients.
 func WithBaseClientOptions(opts ...mcturbo.Option) ClusterOption {
 	return func(c *clusterConfig) error {
 		c.baseClientOptions = append([]mcturbo.Option(nil), opts...)
@@ -55,6 +63,7 @@ func WithBaseClientOptions(opts ...mcturbo.Option) ClusterOption {
 	}
 }
 
+// WithVnodeFactor sets virtual-node factor for consistent hashing.
 func WithVnodeFactor(n int) ClusterOption {
 	return func(c *clusterConfig) error {
 		if n <= 0 {
@@ -65,6 +74,7 @@ func WithVnodeFactor(n int) ClusterOption {
 	}
 }
 
+// WithDistribution sets key distribution strategy.
 func WithDistribution(d Distribution) ClusterOption {
 	return func(c *clusterConfig) error {
 		switch d {
@@ -77,6 +87,7 @@ func WithDistribution(d Distribution) ClusterOption {
 	}
 }
 
+// WithHash sets key hash algorithm.
 func WithHash(h Hash) ClusterOption {
 	return func(c *clusterConfig) error {
 		switch h {
@@ -89,6 +100,8 @@ func WithHash(h Hash) ClusterOption {
 	}
 }
 
+// WithLibketamaCompatible enables libketama-compatible behavior.
+// When enabled, distribution is forced to consistent and hash is forced to MD5.
 func WithLibketamaCompatible(enabled bool) ClusterOption {
 	return func(c *clusterConfig) error {
 		c.libketamaCompatible = enabled

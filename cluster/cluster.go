@@ -10,11 +10,15 @@ import (
 )
 
 var (
+	// ErrClosed is returned when the cluster is already closed.
 	ErrClosed = errors.New("cluster: closed")
 )
 
+// Server defines one memcached server in the cluster.
 type Server struct {
-	Addr   string
+	// Addr is the server address, for example "127.0.0.1:11211".
+	Addr string
+	// Weight controls shard share for consistent hashing.
 	Weight int
 }
 
@@ -39,7 +43,7 @@ type clusterState struct {
 	byAddr  map[string]shardClient
 }
 
-// Cluster routes keys to phase-1 clients.
+// Cluster routes keys to shard clients built from mcturbo.Client.
 type Cluster struct {
 	closed atomic.Bool
 
@@ -55,6 +59,7 @@ type Cluster struct {
 	factory             shardFactory
 }
 
+// NewCluster creates a new distributed client from servers.
 func NewCluster(servers []Server, opts ...ClusterOption) (*Cluster, error) {
 	cfg := defaultClusterConfig()
 	for _, opt := range opts {
@@ -77,6 +82,7 @@ func NewCluster(servers []Server, opts ...ClusterOption) (*Cluster, error) {
 	return c, nil
 }
 
+// Get returns the value for key.
 func (c *Cluster) Get(key string) ([]byte, error) {
 	shard, err := c.pickShard(key)
 	if err != nil {
@@ -85,6 +91,7 @@ func (c *Cluster) Get(key string) ([]byte, error) {
 	return shard.Get(key)
 }
 
+// Set stores value for key with ttlSeconds.
 func (c *Cluster) Set(key string, value []byte, ttlSeconds int) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
@@ -93,6 +100,7 @@ func (c *Cluster) Set(key string, value []byte, ttlSeconds int) error {
 	return shard.Set(key, value, ttlSeconds)
 }
 
+// Delete removes key.
 func (c *Cluster) Delete(key string) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
@@ -101,6 +109,7 @@ func (c *Cluster) Delete(key string) error {
 	return shard.Delete(key)
 }
 
+// Touch updates key expiration to ttlSeconds.
 func (c *Cluster) Touch(key string, ttlSeconds int) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
@@ -109,6 +118,7 @@ func (c *Cluster) Touch(key string, ttlSeconds int) error {
 	return shard.Touch(key, ttlSeconds)
 }
 
+// GetWithContext returns the value for key using ctx.
 func (c *Cluster) GetWithContext(ctx context.Context, key string) ([]byte, error) {
 	shard, err := c.pickShard(key)
 	if err != nil {
@@ -117,6 +127,7 @@ func (c *Cluster) GetWithContext(ctx context.Context, key string) ([]byte, error
 	return shard.GetWithContext(ctx, key)
 }
 
+// SetWithContext stores value for key with ttlSeconds using ctx.
 func (c *Cluster) SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
@@ -125,6 +136,7 @@ func (c *Cluster) SetWithContext(ctx context.Context, key string, value []byte, 
 	return shard.SetWithContext(ctx, key, value, ttlSeconds)
 }
 
+// DeleteWithContext removes key using ctx.
 func (c *Cluster) DeleteWithContext(ctx context.Context, key string) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
@@ -133,6 +145,7 @@ func (c *Cluster) DeleteWithContext(ctx context.Context, key string) error {
 	return shard.DeleteWithContext(ctx, key)
 }
 
+// TouchWithContext updates key expiration using ctx.
 func (c *Cluster) TouchWithContext(ctx context.Context, key string, ttlSeconds int) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
@@ -141,22 +154,27 @@ func (c *Cluster) TouchWithContext(ctx context.Context, key string, ttlSeconds i
 	return shard.TouchWithContext(ctx, key, ttlSeconds)
 }
 
+// GetNoContext is an explicit no-context alias of Get.
 func (c *Cluster) GetNoContext(key string) ([]byte, error) {
 	return c.Get(key)
 }
 
+// SetNoContext is an explicit no-context alias of Set.
 func (c *Cluster) SetNoContext(key string, value []byte, ttlSeconds int) error {
 	return c.Set(key, value, ttlSeconds)
 }
 
+// DeleteNoContext is an explicit no-context alias of Delete.
 func (c *Cluster) DeleteNoContext(key string) error {
 	return c.Delete(key)
 }
 
+// TouchNoContext is an explicit no-context alias of Touch.
 func (c *Cluster) TouchNoContext(key string, ttlSeconds int) error {
 	return c.Touch(key, ttlSeconds)
 }
 
+// UpdateServers updates cluster servers and rebuilds routing.
 func (c *Cluster) UpdateServers(servers []Server) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -166,6 +184,7 @@ func (c *Cluster) UpdateServers(servers []Server) error {
 	return c.updateServersLocked(servers)
 }
 
+// Close closes all shard clients.
 func (c *Cluster) Close() error {
 	if !c.closed.CompareAndSwap(false, true) {
 		return nil

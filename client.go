@@ -16,15 +16,20 @@ import (
 )
 
 var (
-	ErrNotFound  = errors.New("memcache: not found")
+	// ErrNotFound is returned when a key does not exist.
+	ErrNotFound = errors.New("memcache: not found")
+	// ErrNotStored is returned when a conditional store is rejected.
 	ErrNotStored = errors.New("memcache: not stored")
-	ErrClosed    = errors.New("memcache: client closed")
+	// ErrClosed is returned when the client is already closed.
+	ErrClosed = errors.New("memcache: client closed")
 )
 
 var errProtocol = errors.New("memcache: protocol error")
 
+// Logger is an alias of slog.Logger used by options.
 type Logger = slog.Logger
 
+// Option configures Client behavior.
 type Option func(*config) error
 
 type config struct {
@@ -50,6 +55,7 @@ func defaultConfig() config {
 	}
 }
 
+// WithWorkers sets the number of worker groups.
 func WithWorkers(n int) Option {
 	return func(c *config) error {
 		if n <= 0 {
@@ -60,6 +66,7 @@ func WithWorkers(n int) Option {
 	}
 }
 
+// WithDialBackoff sets dial backoff bounds.
 func WithDialBackoff(min, max time.Duration) Option {
 	return func(c *config) error {
 		if min <= 0 || max <= 0 || min > max {
@@ -71,6 +78,8 @@ func WithDialBackoff(min, max time.Duration) Option {
 	}
 }
 
+// WithMaxSlots limits concurrent operations per worker.
+// n=0 means no slot limit.
 func WithMaxSlots(n int) Option {
 	return func(c *config) error {
 		if n < 0 {
@@ -81,6 +90,7 @@ func WithMaxSlots(n int) Option {
 	}
 }
 
+// WithDefaultDeadline sets a fallback socket deadline per request.
 func WithDefaultDeadline(d time.Duration) Option {
 	return func(c *config) error {
 		if d < 0 {
@@ -91,6 +101,7 @@ func WithDefaultDeadline(d time.Duration) Option {
 	}
 }
 
+// WithLogger sets a slog logger for internal logs.
 func WithLogger(l *slog.Logger) Option {
 	return func(c *config) error {
 		c.logger = l
@@ -98,6 +109,7 @@ func WithLogger(l *slog.Logger) Option {
 	}
 }
 
+// WithBufferSize sets read and write buffer sizes in bytes.
 func WithBufferSize(readSize, writeSize int) Option {
 	return func(c *config) error {
 		if readSize <= 0 || writeSize <= 0 {
@@ -119,6 +131,7 @@ type Client struct {
 	backoffMax time.Duration
 }
 
+// New creates a new single-server client.
 func New(addr string, opts ...Option) (*Client, error) {
 	if strings.TrimSpace(addr) == "" {
 		return nil, errors.New("memcache: addr is required")
@@ -158,6 +171,7 @@ func New(addr string, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
+// Get returns the value for key.
 func (c *Client) Get(key string) ([]byte, error) {
 	if err := validateKey(key); err != nil {
 		return nil, err
@@ -165,6 +179,7 @@ func (c *Client) Get(key string) ([]byte, error) {
 	return c.doFast(opGet, key, nil, 0)
 }
 
+// Set stores value for key with ttlSeconds.
 func (c *Client) Set(key string, value []byte, ttlSeconds int) error {
 	if err := validateKey(key); err != nil {
 		return err
@@ -176,6 +191,7 @@ func (c *Client) Set(key string, value []byte, ttlSeconds int) error {
 	return err
 }
 
+// Delete removes key.
 func (c *Client) Delete(key string) error {
 	if err := validateKey(key); err != nil {
 		return err
@@ -184,6 +200,7 @@ func (c *Client) Delete(key string) error {
 	return err
 }
 
+// Touch updates key expiration to ttlSeconds.
 func (c *Client) Touch(key string, ttlSeconds int) error {
 	if err := validateKey(key); err != nil {
 		return err
@@ -195,6 +212,7 @@ func (c *Client) Touch(key string, ttlSeconds int) error {
 	return err
 }
 
+// GetWithContext returns the value for key using ctx for cancellation/deadline.
 func (c *Client) GetWithContext(ctx context.Context, key string) ([]byte, error) {
 	if err := validateKey(key); err != nil {
 		return nil, err
@@ -205,6 +223,7 @@ func (c *Client) GetWithContext(ctx context.Context, key string) ([]byte, error)
 	return c.doWithContext(ctx, opGet, key, nil, 0)
 }
 
+// SetWithContext stores value for key with ttlSeconds using ctx.
 func (c *Client) SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
 	if err := validateKey(key); err != nil {
 		return err
@@ -219,6 +238,7 @@ func (c *Client) SetWithContext(ctx context.Context, key string, value []byte, t
 	return err
 }
 
+// DeleteWithContext removes key using ctx.
 func (c *Client) DeleteWithContext(ctx context.Context, key string) error {
 	if err := validateKey(key); err != nil {
 		return err
@@ -230,6 +250,7 @@ func (c *Client) DeleteWithContext(ctx context.Context, key string) error {
 	return err
 }
 
+// TouchWithContext updates key expiration using ctx.
 func (c *Client) TouchWithContext(ctx context.Context, key string, ttlSeconds int) error {
 	if err := validateKey(key); err != nil {
 		return err
@@ -244,6 +265,7 @@ func (c *Client) TouchWithContext(ctx context.Context, key string, ttlSeconds in
 	return err
 }
 
+// Close closes the client and all internal connections.
 func (c *Client) Close() error {
 	if !c.closed.CompareAndSwap(false, true) {
 		return nil
