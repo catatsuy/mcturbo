@@ -254,3 +254,14 @@ func TestValidateServers(t *testing.T) {
 		t.Fatalf("expected error for duplicate addr")
 	}
 }
+
+func TestFailoverOptionValidation(t *testing.T) {
+	_, err := NewCluster([]Server{{Addr: "127.0.0.1:1", Weight: 1}}, WithServerFailureLimit(0))
+	if err == nil {
+		t.Fatalf("expected error for invalid server failure limit")
+	}
+	_, err = NewCluster([]Server{{Addr: "127.0.0.1:1", Weight: 1}}, WithRetryTimeout(0))
+	if err == nil {
+		t.Fatalf("expected error for invalid retry timeout")
+	}
+}
