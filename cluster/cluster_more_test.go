@@ -44,7 +44,7 @@ type fakeShard struct {
 	closed bool
 }
 
-func (s *fakeShard) Get(key string) ([]byte, error) {
+func (s *fakeShard) Get(key string) (*mcturbo.Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.getCount++
@@ -52,7 +52,7 @@ func (s *fakeShard) Get(key string) ([]byte, error) {
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
-	return append([]byte(nil), s.value...), nil
+	return &mcturbo.Item{Value: append([]byte(nil), s.value...)}, nil
 }
 
 func (s *fakeShard) Set(key string, value []byte, ttlSeconds int) error {
@@ -140,14 +140,14 @@ func (s *fakeShard) Touch(key string, ttlSeconds int) error {
 	return nil
 }
 
-func (s *fakeShard) GetAndTouch(key string, ttlSeconds int) ([]byte, error) {
+func (s *fakeShard) GetAndTouch(key string, ttlSeconds int) (*mcturbo.Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.last = fmt.Sprintf("GetAndTouch:%s:%d", key, ttlSeconds)
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
-	return append([]byte(nil), s.value...), nil
+	return &mcturbo.Item{Value: append([]byte(nil), s.value...)}, nil
 }
 
 func (s *fakeShard) Incr(key string, delta uint64) (uint64, error) {
@@ -175,7 +175,7 @@ func (s *fakeShard) Decr(key string, delta uint64) (uint64, error) {
 	return delta - 1, nil
 }
 
-func (s *fakeShard) GetWithContext(ctx context.Context, key string) ([]byte, error) {
+func (s *fakeShard) GetWithContext(ctx context.Context, key string) (*mcturbo.Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.getWithContextCount++
@@ -183,7 +183,7 @@ func (s *fakeShard) GetWithContext(ctx context.Context, key string) ([]byte, err
 	if s.ctxErr != nil {
 		return nil, s.ctxErr
 	}
-	return append([]byte(nil), s.value...), nil
+	return &mcturbo.Item{Value: append([]byte(nil), s.value...)}, nil
 }
 
 func (s *fakeShard) SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
@@ -269,14 +269,14 @@ func (s *fakeShard) TouchWithContext(ctx context.Context, key string, ttlSeconds
 	return nil
 }
 
-func (s *fakeShard) GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) ([]byte, error) {
+func (s *fakeShard) GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) (*mcturbo.Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.last = fmt.Sprintf("GetAndTouchWithContext:%s:%d", key, ttlSeconds)
 	if s.ctxErr != nil {
 		return nil, s.ctxErr
 	}
-	return append([]byte(nil), s.value...), nil
+	return &mcturbo.Item{Value: append([]byte(nil), s.value...)}, nil
 }
 
 func (s *fakeShard) IncrWithContext(ctx context.Context, key string, delta uint64) (uint64, error) {

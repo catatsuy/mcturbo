@@ -87,8 +87,8 @@ func TestIntegrationSetGetDeleteTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if string(v) != "abc" {
-		t.Fatalf("value mismatch: %q", string(v))
+	if string(v.Value) != "abc" {
+		t.Fatalf("value mismatch: %q", string(v.Value))
 	}
 
 	if err := c.Delete("int:key1"); err != nil {
@@ -123,7 +123,7 @@ func TestIntegrationLargeAndMultilineValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get large: %v", err)
 	}
-	if !bytes.Equal(got, payload) {
+	if !bytes.Equal(got.Value, payload) {
 		t.Fatalf("payload mismatch")
 	}
 }
@@ -196,8 +196,8 @@ func TestIntegrationExtendedStoreCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if string(v) != "yrx" {
-		t.Fatalf("unexpected merged value: %q", string(v))
+	if string(v.Value) != "yrx" {
+		t.Fatalf("unexpected merged value: %q", string(v.Value))
 	}
 
 	if _, err := c.GetAndTouch("int:add", 10); err != nil {

@@ -274,8 +274,8 @@ func TestClientBasicCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get and touch: %v", err)
 	}
-	if string(v2) != "Br2A" {
-		t.Fatalf("unexpected merged value: %q", string(v2))
+	if string(v2.Value) != "Br2A" {
+		t.Fatalf("unexpected merged value: %q", string(v2.Value))
 	}
 	if err := c.Ping(); err != nil {
 		t.Fatalf("ping: %v", err)
@@ -285,8 +285,8 @@ func TestClientBasicCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if string(v) != "value-1" {
-		t.Fatalf("value mismatch: %q", string(v))
+	if string(v.Value) != "value-1" {
+		t.Fatalf("value mismatch: %q", string(v.Value))
 	}
 	if err := c.Touch("k1", 20); err != nil {
 		t.Fatalf("touch: %v", err)
@@ -483,5 +483,191 @@ func TestCloseWhileRequestInFlight(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatalf("request did not return")
+	}
+}
+
+func TestGetMultiEmpty(t *testing.T) {
+	c, err := New("127.0.0.1:11211", WithWorkers(1))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer c.Close()
+
+	got, err := c.GetMulti(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("getmulti empty: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected empty map")
+	}
+}
+
+func TestGetMultiBasicAndMiss(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		data = map[string][]byte{"k1": []byte("v1"), "k3": []byte("v3")}
+	)
+	server := newTestServer(t, func(conn net.Conn) {
+		br := bufio.NewReader(conn)
+		bw := bufio.NewWriter(conn)
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil {
+				return
+			}
+			line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+			parts := strings.Split(line, " ")
+			if len(parts) == 0 {
+				return
+			}
+			switch parts[0] {
+			case "get":
+				for i := 1; i < len(parts); i++ {
+					mu.Lock()
+					v, ok := data[parts[i]]
+					mu.Unlock()
+					if ok {
+						_, _ = bw.WriteString(fmt.Sprintf("VALUE %s 0 %d\r\n", parts[i], len(v)))
+						_, _ = bw.Write(v)
+						_, _ = bw.WriteString("\r\n")
+					}
+				}
+				_, _ = bw.WriteString("END\r\n")
+				_ = bw.Flush()
+			default:
+				return
+			}
+		}
+	})
+	defer server.Close()
+
+	c, err := New(server.Addr(), WithWorkers(2))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer c.Close()
+
+	got, err := c.GetMulti(context.Background(), []string{"k1", "k2", "k3"})
+	if err != nil {
+		t.Fatalf("getmulti: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 hits, got %d", len(got))
+	}
+	if _, ok := got["k2"]; ok {
+		t.Fatalf("miss key should not be present")
+	}
+	if string(got["k1"].Value) != "v1" || string(got["k3"].Value) != "v3" {
+		t.Fatalf("unexpected values")
+	}
+}
+
+func TestGetMultiPartialFailure(t *testing.T) {
+	server := newTestServer(t, func(conn net.Conn) {
+		br := bufio.NewReader(conn)
+		bw := bufio.NewWriter(conn)
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil {
+				return
+			}
+			line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+			if strings.Contains(line, "bad") {
+				_, _ = bw.WriteString("SERVER_ERROR broken\r\n")
+				_ = bw.Flush()
+				_ = conn.Close()
+				return
+			}
+			parts := strings.Split(line, " ")
+			if len(parts) > 1 && parts[0] == "get" {
+				for i := 1; i < len(parts); i++ {
+					_, _ = bw.WriteString(fmt.Sprintf("VALUE %s 0 2\r\nok\r\n", parts[i]))
+				}
+				_, _ = bw.WriteString("END\r\n")
+				_ = bw.Flush()
+			}
+		}
+	})
+	defer server.Close()
+
+	c, err := New(server.Addr(), WithWorkers(2))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer c.Close()
+
+	var goodKey, badKey string
+	for i := range 1000 {
+		k := fmt.Sprintf("g%d", i)
+		if c.pickWorker(k).id == 0 {
+			goodKey = k
+			break
+		}
+	}
+	for i := range 1000 {
+		k := fmt.Sprintf("bad%d", i)
+		if c.pickWorker(k).id == 1 {
+			badKey = k
+			break
+		}
+	}
+	if goodKey == "" || badKey == "" {
+		t.Fatalf("failed to prepare worker-separated keys")
+	}
+
+	got, err := c.GetMulti(context.Background(), []string{goodKey, badKey})
+	if err == nil {
+		t.Fatalf("expected partial error")
+	}
+	var merr *MultiError
+	if !errors.As(err, &merr) {
+		t.Fatalf("expected MultiError, got %T", err)
+	}
+	if len(got) == 0 {
+		t.Fatalf("expected partial success items")
+	}
+	if _, ok := got[goodKey]; !ok {
+		t.Fatalf("expected good key in result")
+	}
+	if _, ok := got[badKey]; ok {
+		t.Fatalf("bad key should not be present")
+	}
+	if len(merr.PerServer) == 0 {
+		t.Fatalf("expected per-server errors")
+	}
+}
+
+func TestGetMultiAllFailure(t *testing.T) {
+	server := newTestServer(t, func(conn net.Conn) {
+		br := bufio.NewReader(conn)
+		bw := bufio.NewWriter(conn)
+		for {
+			if _, err := br.ReadString('\n'); err != nil {
+				return
+			}
+			_, _ = bw.WriteString("SERVER_ERROR fail\r\n")
+			_ = bw.Flush()
+			_ = conn.Close()
+			return
+		}
+	})
+	defer server.Close()
+
+	c, err := New(server.Addr(), WithWorkers(2))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer c.Close()
+
+	got, err := c.GetMulti(context.Background(), []string{"k1", "k2"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	var merr *MultiError
+	if !errors.As(err, &merr) {
+		t.Fatalf("expected MultiError, got %T", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected empty result on all failure")
 	}
 }

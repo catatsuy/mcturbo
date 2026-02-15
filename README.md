@@ -33,6 +33,7 @@ Fast path (no context):
 
 Context-aware path:
 - `GetWithContext(ctx context.Context, key string)`
+- `GetMulti(ctx context.Context, keys []string)`
 - `SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int)`
 - `AddWithContext(ctx context.Context, key string, value []byte, ttlSeconds int)`
 - `ReplaceWithContext(ctx context.Context, key string, value []byte, ttlSeconds int)`

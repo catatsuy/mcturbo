@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"strings"
 	"sync"
@@ -25,6 +26,40 @@ var (
 )
 
 var errProtocol = errors.New("memcache: protocol error")
+
+// Item represents a value returned by get operations.
+type Item struct {
+	Value []byte
+	Flags uint32
+}
+
+// MultiError represents partial failures during GetMulti.
+type MultiError struct {
+	PerServer map[string]error
+}
+
+func (e *MultiError) Error() string {
+	if e == nil || len(e.PerServer) == 0 {
+		return "mcturbo: GetMulti partial failure"
+	}
+	return fmt.Sprintf("mcturbo: GetMulti partial failure: %d servers failed", len(e.PerServer))
+}
+
+func (e *MultiError) Unwrap() error {
+	if e == nil || len(e.PerServer) == 0 {
+		return nil
+	}
+	errs := make([]error, 0, len(e.PerServer))
+	for _, err := range e.PerServer {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
+}
 
 // Logger is an alias of slog.Logger used by options.
 type Logger = slog.Logger
@@ -171,12 +206,80 @@ func New(addr string, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
-// Get returns the value for key.
-func (c *Client) Get(key string) ([]byte, error) {
+// Get returns the item for key.
+func (c *Client) Get(key string) (*Item, error) {
 	if err := validateKey(key); err != nil {
 		return nil, err
 	}
-	return c.doFast(opGet, key, nil, 0, 0)
+	return c.doGetFast(opGet, key, 0)
+}
+
+// GetMulti fetches multiple keys using the memcached text protocol.
+//
+// Note: This method may return both a non-empty result and a non-nil error
+// when the operation partially succeeds (e.g., some workers fail while others succeed).
+//
+// This method does not batch/split keys. If you need to limit request size,
+// split keys on the caller side and call GetMulti multiple times.
+func (c *Client) GetMulti(ctx context.Context, keys []string) (map[string]*Item, error) {
+	out := make(map[string]*Item, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	if ctx == nil {
+		return out, errors.New("memcache: nil context")
+	}
+	if c.closed.Load() {
+		return out, ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
+	for _, key := range keys {
+		if err := validateKey(key); err != nil {
+			return out, err
+		}
+	}
+
+	byWorker := make(map[int][]string, len(c.workers))
+	for _, key := range keys {
+		w := c.pickWorker(key)
+		byWorker[w.id] = append(byWorker[w.id], key)
+	}
+
+	type getMultiResult struct {
+		addr  string
+		items map[string]*Item
+		err   error
+	}
+	ch := make(chan getMultiResult, len(byWorker))
+	for wid, groupedKeys := range byWorker {
+		w := c.workers[wid]
+		ks := append([]string(nil), groupedKeys...)
+		go func(w *workerConn, keys []string) {
+			items, err := w.getMultiWithContext(ctx, keys)
+			ch <- getMultiResult{addr: w.addr, items: items, err: err}
+		}(w, ks)
+	}
+
+	var merr *MultiError
+	for range byWorker {
+		r := <-ch
+		if r.err != nil {
+			if merr == nil {
+				merr = &MultiError{PerServer: map[string]error{}}
+			}
+			if _, exists := merr.PerServer[r.addr]; !exists {
+				merr.PerServer[r.addr] = r.err
+			}
+			continue
+		}
+		maps.Copy(out, r.items)
+	}
+	if merr != nil {
+		return out, merr
+	}
+	return out, nil
 }
 
 // Set stores value for key with ttlSeconds.
@@ -255,14 +358,14 @@ func (c *Client) Touch(key string, ttlSeconds int) error {
 }
 
 // GetAndTouch gets key and updates key expiration to ttlSeconds.
-func (c *Client) GetAndTouch(key string, ttlSeconds int) ([]byte, error) {
+func (c *Client) GetAndTouch(key string, ttlSeconds int) (*Item, error) {
 	if err := validateKey(key); err != nil {
 		return nil, err
 	}
 	if ttlSeconds < 0 {
 		return nil, errors.New("memcache: ttlSeconds must be >= 0")
 	}
-	return c.doFast(opGetAndTouch, key, nil, ttlSeconds, 0)
+	return c.doGetFast(opGetAndTouch, key, ttlSeconds)
 }
 
 // Incr increments a numeric value by delta and returns the new value.
@@ -301,15 +404,15 @@ func (c *Client) Ping() error {
 	return err
 }
 
-// GetWithContext returns the value for key using ctx for cancellation/deadline.
-func (c *Client) GetWithContext(ctx context.Context, key string) ([]byte, error) {
+// GetWithContext returns the item for key using ctx for cancellation/deadline.
+func (c *Client) GetWithContext(ctx context.Context, key string) (*Item, error) {
 	if err := validateKey(key); err != nil {
 		return nil, err
 	}
 	if ctx == nil {
 		return nil, errors.New("memcache: nil context")
 	}
-	return c.doWithContext(ctx, opGet, key, nil, 0, 0)
+	return c.doGetWithContext(ctx, opGet, key, 0)
 }
 
 // SetWithContext stores value for key with ttlSeconds using ctx.
@@ -409,7 +512,7 @@ func (c *Client) TouchWithContext(ctx context.Context, key string, ttlSeconds in
 }
 
 // GetAndTouchWithContext gets key and updates key expiration to ttlSeconds.
-func (c *Client) GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) ([]byte, error) {
+func (c *Client) GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) (*Item, error) {
 	if err := validateKey(key); err != nil {
 		return nil, err
 	}
@@ -419,7 +522,7 @@ func (c *Client) GetAndTouchWithContext(ctx context.Context, key string, ttlSeco
 	if ctx == nil {
 		return nil, errors.New("memcache: nil context")
 	}
-	return c.doWithContext(ctx, opGetAndTouch, key, nil, ttlSeconds, 0)
+	return c.doGetWithContext(ctx, opGetAndTouch, key, ttlSeconds)
 }
 
 // IncrWithContext increments a numeric value by delta and returns the new value.
@@ -490,6 +593,14 @@ func (c *Client) doFast(op opType, key string, value []byte, ttl int, delta uint
 	return w.roundTripFast(request{op: op, key: key, value: value, ttl: ttl, delta: delta})
 }
 
+func (c *Client) doGetFast(op opType, key string, ttl int) (*Item, error) {
+	if c.closed.Load() {
+		return nil, ErrClosed
+	}
+	w := c.pickWorker(key)
+	return w.roundTripGetFast(request{op: op, key: key, ttl: ttl})
+}
+
 func (c *Client) doFastNoKey(op opType) ([]byte, error) {
 	if c.closed.Load() {
 		return nil, ErrClosed
@@ -516,6 +627,24 @@ func (c *Client) doWithContext(ctx context.Context, op opType, key string, value
 		return nil, err
 	}
 	return v, nil
+}
+
+func (c *Client) doGetWithContext(ctx context.Context, op opType, key string, ttl int) (*Item, error) {
+	if c.closed.Load() {
+		return nil, ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	w := c.pickWorker(key)
+	it, err := w.roundTripGetWithContext(ctx, request{op: op, key: key, ttl: ttl})
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return it, nil
 }
 
 func (c *Client) doWithContextNoKey(ctx context.Context, op opType) ([]byte, error) {
@@ -691,6 +820,151 @@ func (w *workerConn) roundTripWithContext(ctx context.Context, req request) ([]b
 	return value, nil
 }
 
+func (w *workerConn) roundTripGetFast(req request) (*Item, error) {
+	w.acquireSlot()
+	defer w.releaseSlot()
+
+	pc, err := w.acquireConnFast()
+	if err != nil {
+		return nil, err
+	}
+	keep := false
+	defer func() {
+		w.releaseConn(pc, keep)
+	}()
+
+	deadline := time.Time{}
+	if w.defaultDeadline > 0 {
+		deadline = time.Now().Add(w.defaultDeadline)
+	}
+	if err := pc.conn.SetDeadline(deadline); err != nil {
+		return nil, err
+	}
+
+	if err := writeRequest(pc.bw, req); err != nil {
+		return nil, err
+	}
+	if err := pc.bw.Flush(); err != nil {
+		return nil, err
+	}
+
+	item, err := readGetItemResponse(pc.br, req)
+	if err != nil {
+		return nil, err
+	}
+	keep = true
+	return item, nil
+}
+
+func (w *workerConn) roundTripGetWithContext(ctx context.Context, req request) (*Item, error) {
+	if err := w.acquireSlotWithContext(ctx); err != nil {
+		return nil, err
+	}
+	defer w.releaseSlot()
+
+	pc, err := w.acquireConnWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keep := false
+	defer func() {
+		w.releaseConn(pc, keep)
+	}()
+
+	deadline := time.Time{}
+	if d, ok := ctx.Deadline(); ok {
+		deadline = d
+	} else if w.defaultDeadline > 0 {
+		deadline = time.Now().Add(w.defaultDeadline)
+	}
+	if err := pc.conn.SetDeadline(deadline); err != nil {
+		return nil, err
+	}
+
+	cancel := func() {}
+	if ctx.Done() != nil && deadline.IsZero() {
+		done := make(chan struct{})
+		cancel = func() { close(done) }
+		conn := pc.conn
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = conn.SetDeadline(time.Now())
+			case <-done:
+			}
+		}()
+	}
+	defer cancel()
+
+	if err := writeRequest(pc.bw, req); err != nil {
+		return nil, normalizeContextErr(ctx, deadline, err)
+	}
+	if err := pc.bw.Flush(); err != nil {
+		return nil, normalizeContextErr(ctx, deadline, err)
+	}
+
+	item, err := readGetItemResponse(pc.br, req)
+	if err != nil {
+		return nil, normalizeContextErr(ctx, deadline, err)
+	}
+	keep = true
+	return item, nil
+}
+
+func (w *workerConn) getMultiWithContext(ctx context.Context, keys []string) (map[string]*Item, error) {
+	if err := w.acquireSlotWithContext(ctx); err != nil {
+		return nil, err
+	}
+	defer w.releaseSlot()
+
+	pc, err := w.acquireConnWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keep := false
+	defer func() {
+		w.releaseConn(pc, keep)
+	}()
+
+	deadline := time.Time{}
+	if d, ok := ctx.Deadline(); ok {
+		deadline = d
+	} else if w.defaultDeadline > 0 {
+		deadline = time.Now().Add(w.defaultDeadline)
+	}
+	if err := pc.conn.SetDeadline(deadline); err != nil {
+		return nil, err
+	}
+
+	cancel := func() {}
+	if ctx.Done() != nil && deadline.IsZero() {
+		done := make(chan struct{})
+		cancel = func() { close(done) }
+		conn := pc.conn
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = conn.SetDeadline(time.Now())
+			case <-done:
+			}
+		}()
+	}
+	defer cancel()
+
+	if err := writeGetMultiRequest(pc.bw, keys); err != nil {
+		return nil, normalizeContextErr(ctx, deadline, err)
+	}
+	if err := pc.bw.Flush(); err != nil {
+		return nil, normalizeContextErr(ctx, deadline, err)
+	}
+	items, err := parseGetMultiResponse(pc.br)
+	if err != nil {
+		return nil, normalizeContextErr(ctx, deadline, err)
+	}
+	keep = true
+	return items, nil
+}
+
 func (w *workerConn) acquireConnFast() (*pooledConn, error) {
 	if pc, ok := w.popIdle(); ok {
 		return pc, nil
@@ -797,9 +1071,9 @@ func (w *workerConn) close() {
 	idle := w.idle
 	w.idle = nil
 	w.poolMu.Unlock()
-	for i := range idle {
-		if idle[i] != nil {
-			_ = idle[i].conn.Close()
+	for _, pc := range idle {
+		if pc != nil {
+			_ = pc.conn.Close()
 		}
 	}
 }
@@ -941,6 +1215,24 @@ func writeRequest(bw *bufio.Writer, req request) error {
 	}
 }
 
+func writeGetMultiRequest(bw *bufio.Writer, keys []string) error {
+	if _, err := bw.WriteString("get "); err != nil {
+		return err
+	}
+	for i := range keys {
+		if i > 0 {
+			if err := bw.WriteByte(' '); err != nil {
+				return err
+			}
+		}
+		if _, err := bw.WriteString(keys[i]); err != nil {
+			return err
+		}
+	}
+	_, err := bw.WriteString("\r\n")
+	return err
+}
+
 func readResponse(br *bufio.Reader, req request) ([]byte, error) {
 	switch req.op {
 	case opGet:
@@ -973,6 +1265,14 @@ func readResponse(br *bufio.Reader, req request) ([]byte, error) {
 }
 
 func parseGetResponse(br *bufio.Reader) ([]byte, error) {
+	item, err := parseGetItemResponse(br)
+	if err != nil {
+		return nil, err
+	}
+	return item.Value, nil
+}
+
+func parseGetItemResponse(br *bufio.Reader) (*Item, error) {
 	line, err := readLine(br)
 	if err != nil {
 		return nil, err
@@ -986,11 +1286,7 @@ func parseGetResponse(br *bufio.Reader) ([]byte, error) {
 	if bytes.HasPrefix(line, []byte("CLIENT_ERROR ")) || bytes.HasPrefix(line, []byte("SERVER_ERROR ")) {
 		return nil, errors.New("memcache: " + string(line))
 	}
-	if !bytes.HasPrefix(line, []byte("VALUE ")) {
-		return nil, fmt.Errorf("%w: unexpected get response %q", errProtocol, line)
-	}
-
-	n, err := parseValueBytes(line)
+	flags, n, err := parseValueMeta(line)
 	if err != nil {
 		return nil, err
 	}
@@ -1013,7 +1309,10 @@ func parseGetResponse(br *bufio.Reader) ([]byte, error) {
 	if !bytes.Equal(endLine, []byte("END")) {
 		return nil, fmt.Errorf("%w: missing END after VALUE", errProtocol)
 	}
-	return buf, nil
+	return &Item{
+		Value: buf,
+		Flags: flags,
+	}, nil
 }
 
 func parseStoreResponse(br *bufio.Reader) error {
@@ -1127,6 +1426,53 @@ func parseCounterResponse(br *bufio.Reader) ([]byte, error) {
 	}
 }
 
+func parseGetMultiResponse(br *bufio.Reader) (map[string]*Item, error) {
+	items := make(map[string]*Item)
+	for {
+		line, err := readLine(br)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(line, []byte("END")) {
+			return items, nil
+		}
+		if bytes.Equal(line, []byte("ERROR")) {
+			return nil, errProtocol
+		}
+		if bytes.HasPrefix(line, []byte("CLIENT_ERROR ")) || bytes.HasPrefix(line, []byte("SERVER_ERROR ")) {
+			return nil, errors.New("memcache: " + string(line))
+		}
+		key, flags, n, err := parseValueHeader(line)
+		if err != nil {
+			return nil, err
+		}
+		buf := make([]byte, n)
+		if _, err := io.ReadFull(br, buf); err != nil {
+			return nil, err
+		}
+		var tail [2]byte
+		if _, err := io.ReadFull(br, tail[:]); err != nil {
+			return nil, err
+		}
+		if tail[0] != '\r' || tail[1] != '\n' {
+			return nil, errProtocol
+		}
+		items[key] = &Item{
+			Value: buf,
+			Flags: flags,
+		}
+	}
+}
+
+func readGetItemResponse(br *bufio.Reader, req request) (*Item, error) {
+	switch req.op {
+	case opGet, opGetAndTouch:
+		return parseGetItemResponse(br)
+	default:
+		return nil, errProtocol
+	}
+}
+
 func readLine(br *bufio.Reader) ([]byte, error) {
 	line, err := br.ReadSlice('\n')
 	if err != nil {
@@ -1168,6 +1514,63 @@ func parseValueBytes(line []byte) (int, error) {
 	return n, nil
 }
 
+func parseValueMeta(line []byte) (uint32, int, error) {
+	_, flags, n, err := parseValueHeaderParts(line)
+	return flags, n, err
+}
+
+func parseValueHeader(line []byte) (string, uint32, int, error) {
+	key, flags, n, err := parseValueHeaderParts(line)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	return string(key), flags, n, nil
+}
+
+func parseValueHeaderParts(line []byte) ([]byte, uint32, int, error) {
+	// VALUE <key> <flags> <bytes> [cas]
+	if len(line) < 8 || !bytes.HasPrefix(line, []byte("VALUE ")) {
+		return nil, 0, 0, fmt.Errorf("%w: unexpected get response %q", errProtocol, line)
+	}
+
+	i := len("VALUE ")
+	keyStart := i
+	for i < len(line) && line[i] != ' ' {
+		i++
+	}
+	if i == len(line) || i == keyStart {
+		return nil, 0, 0, errProtocol
+	}
+	key := line[keyStart:i]
+
+	i++ // skip space
+	flagsStart := i
+	for i < len(line) && line[i] != ' ' {
+		i++
+	}
+	if i == len(line) || i == flagsStart {
+		return nil, 0, 0, errProtocol
+	}
+	flags, err := parseUint32(line[flagsStart:i])
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	i++ // skip space
+	bytesStart := i
+	for i < len(line) && line[i] != ' ' {
+		i++
+	}
+	if bytesStart == i {
+		return nil, 0, 0, errProtocol
+	}
+	n, ok := parsePositiveInt(line[bytesStart:i])
+	if !ok {
+		return nil, 0, 0, errProtocol
+	}
+	return key, flags, n, nil
+}
+
 func writeUintDecimal(bw *bufio.Writer, n int) error {
 	if n < 0 {
 		return errProtocol
@@ -1195,8 +1598,7 @@ func parsePositiveInt(b []byte) (int, bool) {
 		return 0, false
 	}
 	n := 0
-	for i := range b {
-		c := b[i]
+	for _, c := range b {
 		if c < '0' || c > '9' {
 			return 0, false
 		}
@@ -1213,8 +1615,7 @@ func parseUint64(b []byte) (uint64, bool) {
 		return 0, false
 	}
 	var n uint64
-	for i := range b {
-		c := b[i]
+	for _, c := range b {
 		if c < '0' || c > '9' {
 			return 0, false
 		}
@@ -1233,6 +1634,14 @@ func parseCounterValue(v []byte) (uint64, error) {
 		return 0, errProtocol
 	}
 	return n, nil
+}
+
+func parseUint32(b []byte) (uint32, error) {
+	v, ok := parseUint64(b)
+	if !ok || v > uint64(^uint32(0)) {
+		return 0, errProtocol
+	}
+	return uint32(v), nil
 }
 
 func writeUint64Decimal(bw *bufio.Writer, n uint64) error {

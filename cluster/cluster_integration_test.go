@@ -111,8 +111,8 @@ func TestIntegrationModulaSetGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get no context: %v", err)
 	}
-	if string(v) != "nc-v" {
-		t.Fatalf("unexpected value: %q", string(v))
+	if string(v.Value) != "nc-v" {
+		t.Fatalf("unexpected value: %q", string(v.Value))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -124,8 +124,8 @@ func TestIntegrationModulaSetGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get with context: %v", err)
 	}
-	if string(v) != "ctx-v" {
-		t.Fatalf("unexpected value: %q", string(v))
+	if string(v.Value) != "ctx-v" {
+		t.Fatalf("unexpected value: %q", string(v.Value))
 	}
 
 	if err := c.AddNoContext("cluster:modula:add", []byte("a"), 5); err != nil {
@@ -144,8 +144,8 @@ func TestIntegrationModulaSetGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get and touch: %v", err)
 	}
-	if string(v) != "ybx" {
-		t.Fatalf("unexpected merged value: %q", string(v))
+	if string(v.Value) != "ybx" {
+		t.Fatalf("unexpected merged value: %q", string(v.Value))
 	}
 }
 
