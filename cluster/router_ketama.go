@@ -40,7 +40,7 @@ func newKetamaRouter(servers []Server, hashType Hash, hf hashFunc, vnodeFactor i
 				)
 				continue
 			}
-			for j := 0; j < 4; j++ {
+			for j := range 4 {
 				h := hf(token + "#" + strconv.Itoa(j))
 				points = append(points, ketamaPoint{hash: h, shard: shardIdx})
 			}
