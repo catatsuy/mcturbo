@@ -14,6 +14,7 @@ type fakeShard struct {
 	mu sync.Mutex
 
 	getCount                int
+	getsCount               int
 	setCount                int
 	addCount                int
 	replaceCount            int
@@ -31,6 +32,8 @@ type fakeShard struct {
 	prependWithContextCount int
 	incrWithContextCount    int
 	decrWithContextCount    int
+	casCount                int
+	casWithContextCount     int
 
 	getErr    error
 	setErr    error
@@ -53,6 +56,17 @@ func (s *fakeShard) Get(key string) (*mcturbo.Item, error) {
 		return nil, s.getErr
 	}
 	return &mcturbo.Item{Value: append([]byte(nil), s.value...)}, nil
+}
+
+func (s *fakeShard) Gets(key string) (*mcturbo.Item, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.getsCount++
+	s.last = "Gets:" + key
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	return &mcturbo.Item{Value: append([]byte(nil), s.value...), CAS: 1}, nil
 }
 
 func (s *fakeShard) Set(key string, value []byte, flags uint32, ttlSeconds int) error {
@@ -175,6 +189,18 @@ func (s *fakeShard) Decr(key string, delta uint64) (uint64, error) {
 	return delta - 1, nil
 }
 
+func (s *fakeShard) CAS(key string, value []byte, flags uint32, ttlSeconds int, cas uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.casCount++
+	s.last = fmt.Sprintf("CAS:%s:%d:%d", key, ttlSeconds, cas)
+	if s.setErr != nil {
+		return s.setErr
+	}
+	s.value = append([]byte(nil), value...)
+	return nil
+}
+
 func (s *fakeShard) GetWithContext(ctx context.Context, key string) (*mcturbo.Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -184,6 +210,17 @@ func (s *fakeShard) GetWithContext(ctx context.Context, key string) (*mcturbo.It
 		return nil, s.ctxErr
 	}
 	return &mcturbo.Item{Value: append([]byte(nil), s.value...)}, nil
+}
+
+func (s *fakeShard) GetsWithContext(ctx context.Context, key string) (*mcturbo.Item, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.getWithContextCount++
+	s.last = "GetsWithContext:" + key
+	if s.ctxErr != nil {
+		return nil, s.ctxErr
+	}
+	return &mcturbo.Item{Value: append([]byte(nil), s.value...), CAS: 1}, nil
 }
 
 func (s *fakeShard) SetWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error {
@@ -304,6 +341,18 @@ func (s *fakeShard) DecrWithContext(ctx context.Context, key string, delta uint6
 	return delta - 1, nil
 }
 
+func (s *fakeShard) CASWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int, cas uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.casWithContextCount++
+	s.last = fmt.Sprintf("CASWithContext:%s:%d:%d", key, ttlSeconds, cas)
+	if s.ctxErr != nil {
+		return s.ctxErr
+	}
+	s.value = append([]byte(nil), value...)
+	return nil
+}
+
 func (s *fakeShard) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -405,6 +454,9 @@ func TestClusterRoutingAndDelegation(t *testing.T) {
 	if target.getWithContextCount != 1 {
 		t.Fatalf("expected GetWithContext on target")
 	}
+	if _, err := c.GetsNoContext(key); err != nil {
+		t.Fatalf("GetsNoContext: %v", err)
+	}
 
 	if err := c.SetNoContext(key, []byte("v1"), 0, 10); err != nil {
 		t.Fatalf("SetNoContext: %v", err)
@@ -436,10 +488,13 @@ func TestClusterRoutingAndDelegation(t *testing.T) {
 	if _, err := c.DecrWithContext(ctx, key, 1); err != nil {
 		t.Fatalf("DecrWithContext: %v", err)
 	}
+	if err := c.CASNoContext(key, []byte("z"), 1, 30, 1); err != nil {
+		t.Fatalf("CASNoContext: %v", err)
+	}
 	if target.incrCount != 1 || target.decrWithContextCount != 1 {
 		t.Fatalf("expected incr/decr delegation on target: incr=%d decrCtx=%d", target.incrCount, target.decrWithContextCount)
 	}
-	if target.addCount != 1 || target.replaceWithContextCount != 1 || target.appendCount != 1 || target.prependWithContextCount != 1 {
+	if target.addCount != 1 || target.replaceWithContextCount != 1 || target.appendCount != 1 || target.prependWithContextCount != 1 || target.casCount != 1 {
 		t.Fatalf("expected add/replace/append/prepend delegation on target")
 	}
 }

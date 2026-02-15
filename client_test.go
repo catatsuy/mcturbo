@@ -53,8 +53,11 @@ func (s *testServer) Close() {
 
 func TestClientBasicCommands(t *testing.T) {
 	var (
-		mu   sync.Mutex
-		data = map[string][]byte{}
+		mu      sync.Mutex
+		data           = map[string][]byte{}
+		flags          = map[string]uint32{}
+		casID          = map[string]uint64{}
+		nextCAS uint64 = 1
 	)
 	server := newTestServer(t, func(conn net.Conn) {
 		br := bufio.NewReader(conn)
@@ -73,16 +76,9 @@ func TestClientBasicCommands(t *testing.T) {
 				return
 			}
 			switch parts[0] {
-			case "set":
-				fallthrough
-			case "add":
-				fallthrough
-			case "replace":
-				fallthrough
-			case "append":
-				fallthrough
-			case "prepend":
-				if len(parts) != 5 {
+			case "set", "add", "replace", "append", "prepend", "cas":
+				isCAS := parts[0] == "cas"
+				if (!isCAS && len(parts) != 5) || (isCAS && len(parts) != 6) {
 					_, _ = bw.WriteString("CLIENT_ERROR bad\r\n")
 					_ = bw.Flush()
 					continue
@@ -93,6 +89,16 @@ func TestClientBasicCommands(t *testing.T) {
 					return
 				}
 				v := append([]byte(nil), buf[:n]...)
+				reqFlags := uint32(0)
+				if fv, err := strconv.ParseUint(parts[2], 10, 32); err == nil {
+					reqFlags = uint32(fv)
+				}
+				reqCAS := uint64(0)
+				if isCAS {
+					if cv, err := strconv.ParseUint(parts[5], 10, 64); err == nil {
+						reqCAS = cv
+					}
+				}
 				mu.Lock()
 				old, exists := data[parts[1]]
 				switch parts[0] {
@@ -120,6 +126,7 @@ func TestClientBasicCommands(t *testing.T) {
 						continue
 					}
 					data[parts[1]] = append(old, v...)
+					flags[parts[1]] = reqFlags
 				case "prepend":
 					if !exists {
 						mu.Unlock()
@@ -131,9 +138,28 @@ func TestClientBasicCommands(t *testing.T) {
 					nv = append(nv, v...)
 					nv = append(nv, old...)
 					data[parts[1]] = nv
+					flags[parts[1]] = reqFlags
+				case "cas":
+					if !exists {
+						mu.Unlock()
+						_, _ = bw.WriteString("NOT_FOUND\r\n")
+						_ = bw.Flush()
+						continue
+					}
+					if casID[parts[1]] != reqCAS {
+						mu.Unlock()
+						_, _ = bw.WriteString("EXISTS\r\n")
+						_ = bw.Flush()
+						continue
+					}
+					data[parts[1]] = v
+					flags[parts[1]] = reqFlags
 				default:
 					data[parts[1]] = v
+					flags[parts[1]] = reqFlags
 				}
+				nextCAS++
+				casID[parts[1]] = nextCAS
 				mu.Unlock()
 				_, _ = bw.WriteString("STORED\r\n")
 				_ = bw.Flush()
@@ -145,7 +171,23 @@ func TestClientBasicCommands(t *testing.T) {
 				v, ok := data[parts[1]]
 				mu.Unlock()
 				if ok {
-					_, _ = bw.WriteString(fmt.Sprintf("VALUE %s 0 %d\r\n", parts[1], len(v)))
+					_, _ = bw.WriteString(fmt.Sprintf("VALUE %s %d %d\r\n", parts[1], flags[parts[1]], len(v)))
+					_, _ = bw.Write(v)
+					_, _ = bw.WriteString("\r\n")
+				}
+				_, _ = bw.WriteString("END\r\n")
+				_ = bw.Flush()
+			case "gets":
+				if len(parts) != 2 {
+					return
+				}
+				mu.Lock()
+				v, ok := data[parts[1]]
+				f := flags[parts[1]]
+				cas := casID[parts[1]]
+				mu.Unlock()
+				if ok {
+					_, _ = bw.WriteString(fmt.Sprintf("VALUE %s %d %d %d\r\n", parts[1], f, len(v), cas))
 					_, _ = bw.Write(v)
 					_, _ = bw.WriteString("\r\n")
 				}
@@ -200,6 +242,8 @@ func TestClientBasicCommands(t *testing.T) {
 			case "flush_all":
 				mu.Lock()
 				data = map[string][]byte{}
+				flags = map[string]uint32{}
+				casID = map[string]uint64{}
 				mu.Unlock()
 				_, _ = bw.WriteString("OK\r\n")
 				_ = bw.Flush()
@@ -252,7 +296,7 @@ func TestClientBasicCommands(t *testing.T) {
 	}
 	defer c.Close()
 
-	if err := c.Set("k1", []byte("value-1"), 0, 10); err != nil {
+	if err := c.Set("k1", []byte("value-1"), 11, 10); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	if err := c.Add("k2", []byte("v2"), 0, 10); err != nil {
@@ -287,6 +331,22 @@ func TestClientBasicCommands(t *testing.T) {
 	}
 	if string(v.Value) != "value-1" {
 		t.Fatalf("value mismatch: %q", string(v.Value))
+	}
+	if v.Flags != 11 {
+		t.Fatalf("flags mismatch: %d", v.Flags)
+	}
+	it, err := c.Gets("k1")
+	if err != nil {
+		t.Fatalf("gets: %v", err)
+	}
+	if it.CAS == 0 {
+		t.Fatalf("expected CAS")
+	}
+	if err := c.CAS("k1", []byte("value-2"), 12, 20, it.CAS); err != nil {
+		t.Fatalf("cas: %v", err)
+	}
+	if err := c.CAS("k1", []byte("value-3"), 13, 20, it.CAS); !errors.Is(err, ErrCASConflict) {
+		t.Fatalf("expected ErrCASConflict, got %v", err)
 	}
 	if err := c.Touch("k1", 20); err != nil {
 		t.Fatalf("touch: %v", err)
