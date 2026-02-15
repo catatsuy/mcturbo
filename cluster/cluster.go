@@ -23,7 +23,7 @@ type Server struct {
 }
 
 type shardClient interface {
-	Get(key string) ([]byte, error)
+	Get(key string) (*mcturbo.Item, error)
 	Set(key string, value []byte, ttlSeconds int) error
 	Add(key string, value []byte, ttlSeconds int) error
 	Replace(key string, value []byte, ttlSeconds int) error
@@ -31,10 +31,10 @@ type shardClient interface {
 	Prepend(key string, value []byte) error
 	Delete(key string) error
 	Touch(key string, ttlSeconds int) error
-	GetAndTouch(key string, ttlSeconds int) ([]byte, error)
+	GetAndTouch(key string, ttlSeconds int) (*mcturbo.Item, error)
 	Incr(key string, delta uint64) (uint64, error)
 	Decr(key string, delta uint64) (uint64, error)
-	GetWithContext(ctx context.Context, key string) ([]byte, error)
+	GetWithContext(ctx context.Context, key string) (*mcturbo.Item, error)
 	SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error
 	AddWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error
 	ReplaceWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error
@@ -42,7 +42,7 @@ type shardClient interface {
 	PrependWithContext(ctx context.Context, key string, value []byte) error
 	DeleteWithContext(ctx context.Context, key string) error
 	TouchWithContext(ctx context.Context, key string, ttlSeconds int) error
-	GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) ([]byte, error)
+	GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) (*mcturbo.Item, error)
 	IncrWithContext(ctx context.Context, key string, delta uint64) (uint64, error)
 	DecrWithContext(ctx context.Context, key string, delta uint64) (uint64, error)
 	Close() error
@@ -97,7 +97,7 @@ func NewCluster(servers []Server, opts ...ClusterOption) (*Cluster, error) {
 }
 
 // Get returns the value for key.
-func (c *Cluster) Get(key string) ([]byte, error) {
+func (c *Cluster) Get(key string) (*mcturbo.Item, error) {
 	shard, err := c.pickShard(key)
 	if err != nil {
 		return nil, err
@@ -169,7 +169,7 @@ func (c *Cluster) Touch(key string, ttlSeconds int) error {
 }
 
 // GetAndTouch gets key and updates key expiration to ttlSeconds.
-func (c *Cluster) GetAndTouch(key string, ttlSeconds int) ([]byte, error) {
+func (c *Cluster) GetAndTouch(key string, ttlSeconds int) (*mcturbo.Item, error) {
 	shard, err := c.pickShard(key)
 	if err != nil {
 		return nil, err
@@ -196,7 +196,7 @@ func (c *Cluster) Decr(key string, delta uint64) (uint64, error) {
 }
 
 // GetWithContext returns the value for key using ctx.
-func (c *Cluster) GetWithContext(ctx context.Context, key string) ([]byte, error) {
+func (c *Cluster) GetWithContext(ctx context.Context, key string) (*mcturbo.Item, error) {
 	shard, err := c.pickShard(key)
 	if err != nil {
 		return nil, err
@@ -268,7 +268,7 @@ func (c *Cluster) TouchWithContext(ctx context.Context, key string, ttlSeconds i
 }
 
 // GetAndTouchWithContext gets key and updates key expiration to ttlSeconds.
-func (c *Cluster) GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) ([]byte, error) {
+func (c *Cluster) GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) (*mcturbo.Item, error) {
 	shard, err := c.pickShard(key)
 	if err != nil {
 		return nil, err
@@ -295,7 +295,7 @@ func (c *Cluster) DecrWithContext(ctx context.Context, key string, delta uint64)
 }
 
 // GetNoContext is an explicit no-context alias of Get.
-func (c *Cluster) GetNoContext(key string) ([]byte, error) {
+func (c *Cluster) GetNoContext(key string) (*mcturbo.Item, error) {
 	return c.Get(key)
 }
 
@@ -335,7 +335,7 @@ func (c *Cluster) TouchNoContext(key string, ttlSeconds int) error {
 }
 
 // GetAndTouchNoContext is an explicit no-context alias of GetAndTouch.
-func (c *Cluster) GetAndTouchNoContext(key string, ttlSeconds int) ([]byte, error) {
+func (c *Cluster) GetAndTouchNoContext(key string, ttlSeconds int) (*mcturbo.Item, error) {
 	return c.GetAndTouch(key, ttlSeconds)
 }
 
