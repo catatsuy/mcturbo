@@ -4,10 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/catatsuy/mcturbo"
 )
+
+type fixedRouter struct {
+	idx int
+}
+
+func (r *fixedRouter) Pick(_ string) int {
+	return r.idx
+}
 
 func TestDefaultDistributionIsModula(t *testing.T) {
 	c, err := NewCluster([]Server{{Addr: "127.0.0.1:11111", Weight: 1}})
@@ -263,5 +272,82 @@ func TestFailoverOptionValidation(t *testing.T) {
 	_, err = NewCluster([]Server{{Addr: "127.0.0.1:1", Weight: 1}}, WithRetryTimeout(0))
 	if err == nil {
 		t.Fatalf("expected error for invalid retry timeout")
+	}
+}
+
+func TestWithRouterFactoryValidation(t *testing.T) {
+	_, err := NewCluster([]Server{{Addr: "127.0.0.1:1", Weight: 1}}, WithRouterFactory(nil))
+	if err == nil {
+		t.Fatalf("expected error for nil router factory")
+	}
+}
+
+func TestWithRouterFactoryIsUsed(t *testing.T) {
+	var called atomic.Int32
+	fakeByAddr := map[string]*fakeShard{}
+	factory := func(addr string, opts ...mcturbo.Option) (shardClient, error) {
+		s := &fakeShard{value: []byte("from-" + addr)}
+		fakeByAddr[addr] = s
+		return s, nil
+	}
+	routerFactory := func(servers []Server, dist Distribution, hash Hash, vnode int) (Router, error) {
+		called.Add(1)
+		if len(servers) != 2 {
+			t.Fatalf("unexpected server count: %d", len(servers))
+		}
+		return &fixedRouter{idx: 1}, nil
+	}
+
+	c, err := NewCluster(
+		[]Server{{Addr: "127.0.0.1:21011", Weight: 1}, {Addr: "127.0.0.1:21012", Weight: 1}},
+		withTestFactory(factory),
+		WithRouterFactory(routerFactory),
+	)
+	if err != nil {
+		t.Fatalf("new cluster: %v", err)
+	}
+	defer c.Close()
+
+	if called.Load() != 1 {
+		t.Fatalf("router factory should be called once on NewCluster, got %d", called.Load())
+	}
+
+	if _, err := c.GetNoContext("any-key"); err != nil {
+		t.Fatalf("get no context: %v", err)
+	}
+	if fakeByAddr["127.0.0.1:21011"].getCount != 0 || fakeByAddr["127.0.0.1:21012"].getCount != 1 {
+		t.Fatalf("custom router must route to second shard")
+	}
+
+	if err := c.UpdateServers([]Server{{Addr: "127.0.0.1:21011", Weight: 1}, {Addr: "127.0.0.1:21012", Weight: 1}}); err != nil {
+		t.Fatalf("update servers: %v", err)
+	}
+	if called.Load() != 2 {
+		t.Fatalf("router factory should be called on UpdateServers, got %d", called.Load())
+	}
+}
+
+func TestBuiltInRouterFactories(t *testing.T) {
+	modulaFactory := ModulaRouterFactory(HashCRC32)
+	r1, err := modulaFactory([]Server{{Addr: "127.0.0.1:1", Weight: 1}}, DistributionConsistent, HashMD5, 123)
+	if err != nil {
+		t.Fatalf("modula factory: %v", err)
+	}
+	if _, ok := r1.(*modulaRouter); !ok {
+		t.Fatalf("ModulaRouterFactory must return modulaRouter")
+	}
+
+	consistentFactory := ConsistentRouterFactory(HashMD5, defaultVnodeFactor)
+	r2, err := consistentFactory(
+		[]Server{{Addr: "127.0.0.1:1", Weight: 1}, {Addr: "127.0.0.1:2", Weight: 1}},
+		DistributionModula,
+		HashCRC32,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("consistent factory: %v", err)
+	}
+	if _, ok := r2.(*ketamaRouter); !ok {
+		t.Fatalf("ConsistentRouterFactory must return ketamaRouter")
 	}
 }

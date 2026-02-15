@@ -46,6 +46,7 @@ type clusterConfig struct {
 	serverFailureLimit  int
 	retryTimeout        time.Duration
 	factory             shardFactory
+	routerFactory       RouterFactory
 }
 
 func defaultClusterConfig() clusterConfig {
@@ -59,6 +60,7 @@ func defaultClusterConfig() clusterConfig {
 		factory: func(addr string, opts ...mcturbo.Option) (shardClient, error) {
 			return mcturbo.New(addr, opts...)
 		},
+		routerFactory: DefaultRouterFactory,
 	}
 }
 
@@ -142,6 +144,17 @@ func WithRetryTimeout(d time.Duration) ClusterOption {
 			return errors.New("cluster: retry timeout must be > 0")
 		}
 		c.retryTimeout = d
+		return nil
+	}
+}
+
+// WithRouterFactory sets a custom router builder used by NewCluster and UpdateServers.
+func WithRouterFactory(f RouterFactory) ClusterOption {
+	return func(c *clusterConfig) error {
+		if f == nil {
+			return errors.New("cluster: router factory is nil")
+		}
+		c.routerFactory = f
 		return nil
 	}
 }

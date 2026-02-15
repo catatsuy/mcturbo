@@ -94,6 +94,7 @@ type Cluster struct {
 	retryTimeout        time.Duration
 	healthByAddr        map[string]*shardHealth
 	factory             shardFactory
+	routerFactory       RouterFactory
 }
 
 // NewCluster creates a new distributed client from servers.
@@ -116,6 +117,7 @@ func NewCluster(servers []Server, opts ...ClusterOption) (*Cluster, error) {
 		retryTimeout:        cfg.retryTimeout,
 		healthByAddr:        map[string]*shardHealth{},
 		factory:             cfg.factory,
+		routerFactory:       cfg.routerFactory,
 	}
 	if err := c.updateServersLocked(servers); err != nil {
 		return nil, err
@@ -577,7 +579,7 @@ func (c *Cluster) updateServersLocked(servers []Server) error {
 		return err
 	}
 
-	router, err := newRouter(normalized, c.distribution, c.hash, c.vnodeFactor)
+	router, err := c.routerFactory(normalized, c.distribution, c.hash, c.vnodeFactor)
 	if err != nil {
 		return err
 	}

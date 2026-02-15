@@ -118,6 +118,7 @@ Lifecycle:
 ## Cluster Client
 
 `cluster.Cluster` routes each key to one shard and calls the existing `mcturbo.Client` methods internally.
+The routing layer is extensible: you can pass any `RouterFactory`, and you can also use built-in router factories.
 
 ### Routing Options
 
@@ -132,6 +133,64 @@ Lifecycle:
   - `WithLibketamaCompatible(true)` forces:
     - distribution = consistent
     - hash = MD5
+- Custom router:
+  - `WithRouterFactory(cluster.RouterFactory)`
+  - You can inject your own `Router` implementation.
+  - Built-ins are also exposed as factories:
+    - `cluster.DefaultRouterFactory`
+    - `cluster.ModulaRouterFactory(hash)`
+    - `cluster.ConsistentRouterFactory(hash, vnodeFactor)`
+
+### Built-in Router Behavior
+
+- `DistributionModula`:
+  - `idx = hash(key) % serverCount`
+  - Fast O(1) lookup
+  - More key movement when server count changes
+- `DistributionConsistent` (Ketama):
+  - Builds a hash ring with virtual nodes (`vnodeFactor * weight * 4`)
+  - Uses binary search lookup on the ring (O(log M), `M` = ring points)
+  - Smaller key movement when servers are added/removed
+- `WithLibketamaCompatible(true)` forces consistent routing with MD5 hash.
+
+### Custom Router Example
+
+```go
+type stickyRouter struct{}
+
+func (r *stickyRouter) Pick(key string) int {
+	_ = key
+	return 0 // always shard 0 (example only)
+}
+
+clusterClient, err := cluster.NewCluster(
+	[]cluster.Server{
+		{Addr: "127.0.0.1:11211", Weight: 1},
+		{Addr: "127.0.0.1:11212", Weight: 1},
+	},
+	cluster.WithRouterFactory(func(
+		servers []cluster.Server,
+		dist cluster.Distribution,
+		hash cluster.Hash,
+		vnode int,
+	) (cluster.Router, error) {
+		_ = servers
+		_ = dist
+		_ = hash
+		_ = vnode
+		return &stickyRouter{}, nil
+	}),
+)
+if err != nil {
+	log.Fatal(err)
+}
+defer clusterClient.Close()
+```
+
+Notes:
+- Your factory is called on `NewCluster` and `UpdateServers`.
+- `Router.Pick` must return an index in `[0, len(servers)-1]`.
+- Cluster operation flow stays the same: `Pick(key)` -> target shard client call.
 
 ### Server Update Behavior
 
