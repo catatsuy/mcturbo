@@ -810,7 +810,7 @@ func parsePositiveInt(b []byte) (int, bool) {
 		return 0, false
 	}
 	n := 0
-	for i := 0; i < len(b); i++ {
+	for i := range b {
 		c := b[i]
 		if c < '0' || c > '9' {
 			return 0, false

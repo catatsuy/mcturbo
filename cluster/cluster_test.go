@@ -76,7 +76,7 @@ func TestModulaDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new router: %v", err)
 	}
-	for i := 0; i < 5000; i++ {
+	for i := range 5000 {
 		k := fmt.Sprintf("k-%d", i)
 		a := r.Pick(k)
 		b := r.Pick(k)
@@ -109,7 +109,7 @@ func TestConsistentMovementLessThanModuloOnAddServer(t *testing.T) {
 	movedConsistent := 0
 	movedModulo := 0
 	const n = 10000
-	for i := 0; i < n; i++ {
+	for i := range n {
 		k := fmt.Sprintf("k-%d", i)
 		if oldR.Pick(k) != newR.Pick(k) {
 			movedConsistent++
@@ -137,7 +137,7 @@ func TestConsistentWeightEffect(t *testing.T) {
 	}
 
 	var c0, c1 int
-	for i := 0; i < 20000; i++ {
+	for i := range 20000 {
 		k := fmt.Sprintf("wk-%d", i)
 		if r.Pick(k) == 0 {
 			c0++
@@ -189,9 +189,7 @@ func TestUpdateServersConcurrentSafety(t *testing.T) {
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		i := 0
 		for {
 			select {
@@ -206,13 +204,13 @@ func TestUpdateServersConcurrentSafety(t *testing.T) {
 			}
 			i++
 		}
-	}()
+	})
 
-	for g := 0; g < 8; g++ {
+	for g := range 8 {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < 500; i++ {
+			for i := range 500 {
 				_, _ = c.GetNoContext(fmt.Sprintf("k-%d-%d", id, i))
 			}
 		}(g)
