@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -54,6 +55,10 @@ type shardClient interface {
 	IncrWithContext(ctx context.Context, key string, delta uint64) (uint64, error)
 	DecrWithContext(ctx context.Context, key string, delta uint64) (uint64, error)
 	CASWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int, cas uint64) error
+	FlushAll() error
+	Ping() error
+	FlushAllWithContext(ctx context.Context) error
+	PingWithContext(ctx context.Context) error
 	Close() error
 }
 
@@ -362,6 +367,46 @@ func (c *Cluster) CASWithContext(ctx context.Context, key string, value []byte, 
 	})
 }
 
+// FlushAll removes all keys on all shards.
+func (c *Cluster) FlushAll() error {
+	return c.execAllNoContext(func(addr string, shard shardClient) error {
+		if err := shard.FlushAll(); err != nil {
+			return fmt.Errorf("cluster: flush_all on %s: %w", addr, err)
+		}
+		return nil
+	})
+}
+
+// Ping checks connectivity against all shards.
+func (c *Cluster) Ping() error {
+	return c.execAllNoContext(func(addr string, shard shardClient) error {
+		if err := shard.Ping(); err != nil {
+			return fmt.Errorf("cluster: ping on %s: %w", addr, err)
+		}
+		return nil
+	})
+}
+
+// FlushAllWithContext removes all keys on all shards using ctx.
+func (c *Cluster) FlushAllWithContext(ctx context.Context) error {
+	return c.execAllWithContext(ctx, func(ctx context.Context, addr string, shard shardClient) error {
+		if err := shard.FlushAllWithContext(ctx); err != nil {
+			return fmt.Errorf("cluster: flush_all on %s: %w", addr, err)
+		}
+		return nil
+	})
+}
+
+// PingWithContext checks connectivity against all shards using ctx.
+func (c *Cluster) PingWithContext(ctx context.Context) error {
+	return c.execAllWithContext(ctx, func(ctx context.Context, addr string, shard shardClient) error {
+		if err := shard.PingWithContext(ctx); err != nil {
+			return fmt.Errorf("cluster: ping on %s: %w", addr, err)
+		}
+		return nil
+	})
+}
+
 // GetNoContext is an explicit no-context alias of Get.
 func (c *Cluster) GetNoContext(key string) (*mcturbo.Item, error) {
 	return c.Get(key)
@@ -484,6 +529,16 @@ func (c *Cluster) DecrNoContext(key string, delta uint64) (uint64, error) {
 // CASNoContext is an explicit no-context alias of CAS.
 func (c *Cluster) CASNoContext(key string, value []byte, flags uint32, ttlSeconds int, cas uint64) error {
 	return c.CAS(key, value, flags, ttlSeconds, cas)
+}
+
+// FlushAllNoContext is an explicit no-context alias of FlushAll.
+func (c *Cluster) FlushAllNoContext() error {
+	return c.FlushAll()
+}
+
+// PingNoContext is an explicit no-context alias of Ping.
+func (c *Cluster) PingNoContext() error {
+	return c.Ping()
 }
 
 // UpdateServers updates cluster servers and rebuilds routing.
@@ -827,6 +882,56 @@ func (c *Cluster) noteFailure(addr string, err error) {
 
 func (c *Cluster) shouldTryNext(err error) bool {
 	return c.removeFailedServers && isCommunicationFailure(err)
+}
+
+func (c *Cluster) execAllNoContext(fn func(addr string, shard shardClient) error) error {
+	if c.closed.Load() {
+		return ErrClosed
+	}
+	st := c.loadState()
+	if st == nil || len(st.shards) == 0 {
+		return errNoServers
+	}
+	errs := make([]error, 0, len(st.shards))
+	for i := range st.shards {
+		if err := fn(st.servers[i].Addr, st.shards[i]); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
+}
+
+func (c *Cluster) execAllWithContext(ctx context.Context, fn func(ctx context.Context, addr string, shard shardClient) error) error {
+	if c.closed.Load() {
+		return ErrClosed
+	}
+	if ctx == nil {
+		return errors.New("cluster: nil context")
+	}
+	st := c.loadState()
+	if st == nil || len(st.shards) == 0 {
+		return errNoServers
+	}
+	errs := make([]error, 0, len(st.shards))
+	for i := range st.shards {
+		if err := ctx.Err(); err != nil {
+			if len(errs) == 0 {
+				return err
+			}
+			errs = append(errs, err)
+			return errors.Join(errs...)
+		}
+		if err := fn(ctx, st.servers[i].Addr, st.shards[i]); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
 }
 
 func isCommunicationFailure(err error) bool {

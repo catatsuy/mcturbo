@@ -131,19 +131,29 @@ func main() {
 - `UpdateServers` may move keys.
 - Shards with unchanged `Addr` are reused.
 - Removed shards are closed.
-- Dead server auto-eject is available via:
-  - `WithRemoveFailedServers(true)`
-  - `WithServerFailureLimit(n)`
-  - `WithRetryTimeout(d)`
+- Optional failover (temporary auto-eject) is enabled by:
+  - `WithRemoveFailedServers(true)` (default: `false`)
+  - `WithServerFailureLimit(n)` (default: `2`)
+  - `WithRetryTimeout(d)` (default: `2s`)
+- Failover is only used for communication-level failures:
+  - network close (`io.EOF`, `net.ErrClosed`)
+  - timeout/non-temporary `net.Error`
+  - protocol parse errors (`mcturbo.IsProtocolError(err)`)
+- Failover is not used for semantic errors:
+  - `ErrNotFound`
+  - `ErrNotStored`
+  - `ErrCASConflict`
+- If all servers are temporarily ejected, the cluster falls back to trying all servers.
+- `GetMulti` keeps partial-success semantics (`result` and `error` can both be non-nil).
 
 ### Cluster APIs
 
 Context-aware path:
-- `GetWithContext`, `GetsWithContext`, `GetMultiWithContext`, `SetWithContext`, `DeleteWithContext`, `TouchWithContext`, `CASWithContext`
+- `GetWithContext`, `GetsWithContext`, `GetMultiWithContext`, `SetWithContext`, `AddWithContext`, `ReplaceWithContext`, `CASWithContext`, `AppendWithContext`, `PrependWithContext`, `DeleteWithContext`, `TouchWithContext`, `GetAndTouchWithContext`, `IncrWithContext`, `DecrWithContext`, `FlushAllWithContext`, `PingWithContext`
 
 Fast path:
-- `Get`, `Gets`, `GetMulti`, `Set`, `Add`, `Replace`, `CAS`, `Append`, `Prepend`, `Delete`, `Touch`, `GetAndTouch`, `Incr`, `Decr`
-- Explicit aliases: `GetNoContext`, `GetsNoContext`, `SetNoContext`, `AddNoContext`, `ReplaceNoContext`, `CASNoContext`, `AppendNoContext`, `PrependNoContext`, `DeleteNoContext`, `TouchNoContext`, `GetAndTouchNoContext`, `IncrNoContext`, `DecrNoContext`
+- `Get`, `Gets`, `GetMulti`, `Set`, `Add`, `Replace`, `CAS`, `Append`, `Prepend`, `Delete`, `Touch`, `GetAndTouch`, `Incr`, `Decr`, `FlushAll`, `Ping`
+- Explicit aliases: `GetNoContext`, `GetsNoContext`, `SetNoContext`, `AddNoContext`, `ReplaceNoContext`, `CASNoContext`, `AppendNoContext`, `PrependNoContext`, `DeleteNoContext`, `TouchNoContext`, `GetAndTouchNoContext`, `IncrNoContext`, `DecrNoContext`, `FlushAllNoContext`, `PingNoContext`
 
 Management:
 - `UpdateServers([]Server)`

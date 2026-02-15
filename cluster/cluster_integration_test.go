@@ -325,3 +325,103 @@ func TestIntegrationCAS(t *testing.T) {
 		t.Fatalf("expected cas conflict, got %v", err)
 	}
 }
+
+func TestIntegrationPingAndFlushAll(t *testing.T) {
+	c := newIntegrationCluster(t, WithDistribution(DistributionModula))
+	defer c.Close()
+
+	if err := c.PingNoContext(); err != nil {
+		t.Fatalf("ping no context: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := c.PingWithContext(ctx); err != nil {
+		t.Fatalf("ping with context: %v", err)
+	}
+
+	if err := c.SetNoContext("cluster:flush:key1", []byte("v1"), 0, 30); err != nil {
+		t.Fatalf("set key1: %v", err)
+	}
+	if err := c.SetNoContext("cluster:flush:key2", []byte("v2"), 0, 30); err != nil {
+		t.Fatalf("set key2: %v", err)
+	}
+	if err := c.FlushAllNoContext(); err != nil {
+		t.Fatalf("flush all no context: %v", err)
+	}
+	if _, err := c.GetNoContext("cluster:flush:key1"); !errors.Is(err, mcturbo.ErrNotFound) {
+		t.Fatalf("expected key1 not found after flush all, got %v", err)
+	}
+
+	if err := c.SetNoContext("cluster:flush:key3", []byte("v3"), 0, 30); err != nil {
+		t.Fatalf("set key3: %v", err)
+	}
+	if err := c.FlushAllWithContext(ctx); err != nil {
+		t.Fatalf("flush all with context: %v", err)
+	}
+	if _, err := c.GetWithContext(ctx, "cluster:flush:key3"); !errors.Is(err, mcturbo.ErrNotFound) {
+		t.Fatalf("expected key3 not found after flush all with context, got %v", err)
+	}
+}
+
+func TestIntegrationFailoverCommunicationError(t *testing.T) {
+	if len(integrationServers) == 0 {
+		t.Skip("memcached command is not available")
+	}
+
+	deadAddr := reserveUnusedAddr(t)
+	servers := []Server{
+		{Addr: deadAddr, Weight: 1},
+		integrationServers[0],
+	}
+	c, err := NewCluster(
+		servers,
+		WithDistribution(DistributionModula),
+		WithRemoveFailedServers(true),
+		WithServerFailureLimit(1),
+		WithRetryTimeout(200*time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("new cluster: %v", err)
+	}
+	defer c.Close()
+
+	key := keyForShardIndex(t, c, 0)
+	if err := c.SetNoContext(key, []byte("failover-v"), 0, 30); err != nil {
+		t.Fatalf("set with failover: %v", err)
+	}
+
+	it, err := c.GetNoContext(key)
+	if err != nil {
+		t.Fatalf("get with failover: %v", err)
+	}
+	if string(it.Value) != "failover-v" {
+		t.Fatalf("unexpected value after failover: %q", string(it.Value))
+	}
+}
+
+func reserveUnusedAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	return addr
+}
+
+func keyForShardIndex(t *testing.T, c *Cluster, want int) string {
+	t.Helper()
+	st := c.loadState()
+	if st == nil || st.router == nil {
+		t.Fatalf("cluster state is not ready")
+	}
+	for i := 0; i < 100000; i++ {
+		k := fmt.Sprintf("cluster:failover:key:%d", i)
+		if st.router.Pick(k) == want {
+			return k
+		}
+	}
+	t.Fatalf("failed to find key for shard %d", want)
+	return ""
+}
