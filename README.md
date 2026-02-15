@@ -1,74 +1,30 @@
 # mcturbo
 
-`mcturbo` is a memcached ASCII (text) protocol client for Go 1.26.
+`mcturbo` is a memcached ASCII (text protocol) client for Go 1.26.
 
-It provides:
-- A single-server client (`mcturbo.Client`)
-- A distributed cluster client (`cluster.Cluster`)
+It provides two clients:
+- `mcturbo.Client` for a single memcached server
+- `cluster.Cluster` for multi-server routing
 
-## Scope
+## What This Project Supports
 
 - Protocol: memcached ASCII only
-- Supported commands: `get`, `gets`, `set`, `add`, `replace`, `cas`, `append`, `prepend`, `delete`, `touch`, `gat`, `incr`, `decr`
-- Not in scope: binary protocol, SASL, compression, serializer
+- Commands: `get`, `gets`, `set`, `add`, `replace`, `cas`, `append`, `prepend`, `delete`, `touch`, `gat`, `incr`, `decr`, `flush_all`, `version`
+- Both API styles:
+  - Fast path (no `context` argument)
+  - Context-aware path (`*WithContext`)
 
-## Single-Server Client
+Not supported:
+- binary protocol, SASL, compression, serializer
 
-### APIs
-
-Fast path (no context):
-- `Get(key string)`
-- `Gets(key string)`
-- `GetMulti(keys []string)`
-- `Set(key string, value []byte, flags uint32, ttlSeconds int)`
-- `Add(key string, value []byte, flags uint32, ttlSeconds int)`
-- `Replace(key string, value []byte, flags uint32, ttlSeconds int)`
-- `CAS(key string, value []byte, flags uint32, ttlSeconds int, cas uint64)`
-- `Append(key string, value []byte)`
-- `Prepend(key string, value []byte)`
-- `Delete(key string)`
-- `Touch(key string, ttlSeconds int)`
-- `GetAndTouch(key string, ttlSeconds int)`
-- `Incr(key string, delta uint64)`
-- `Decr(key string, delta uint64)`
-- `FlushAll()`
-- `Ping()`
-
-Context-aware path:
-- `GetWithContext(ctx context.Context, key string)`
-- `GetsWithContext(ctx context.Context, key string)`
-- `GetMultiWithContext(ctx context.Context, keys []string)`
-- `SetWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
-- `AddWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
-- `ReplaceWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
-- `CASWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int, cas uint64)`
-- `AppendWithContext(ctx context.Context, key string, value []byte)`
-- `PrependWithContext(ctx context.Context, key string, value []byte)`
-- `DeleteWithContext(ctx context.Context, key string)`
-- `TouchWithContext(ctx context.Context, key string, ttlSeconds int)`
-- `GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int)`
-- `IncrWithContext(ctx context.Context, key string, delta uint64)`
-- `DecrWithContext(ctx context.Context, key string, delta uint64)`
-- `FlushAllWithContext(ctx context.Context)`
-- `PingWithContext(ctx context.Context)`
-
-Lifecycle:
-- `Close()`
-
-### Timeout and Cancellation
-
-- `*WithContext` methods use `context` as the source of truth for deadline/cancellation.
-- Fast-path methods do not take `context`.
-- `WithDefaultDeadline(d)` sets a fallback socket deadline per request.
-- `WithMaxSlots(n)` limits per-worker concurrency. `n=0` means unlimited.
-
-### Single-Server Example
+## Example (Single Server)
 
 ```go
 package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -76,35 +32,94 @@ import (
 )
 
 func main() {
-	c, err := mcturbo.New(
-		"127.0.0.1:11211",
-		mcturbo.WithWorkers(4),
-	)
+	c, err := mcturbo.New("127.0.0.1:11211", mcturbo.WithWorkers(4))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer c.Close()
 
-	if err := c.Set("k1", []byte("value"), 0, 10); err != nil {
+	// Fast path: no context argument.
+	if err := c.Set("user:1", []byte("alice"), 1, 60); err != nil {
 		log.Fatal(err)
 	}
 
+	// Context-aware path for deadline/cancel.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	v, err := c.GetWithContext(ctx, "k1")
+	it, err := c.GetWithContext(ctx, "user:1")
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("value=%s flags=%d", string(v.Value), v.Flags)
+	log.Printf("get: value=%q flags=%d", string(it.Value), it.Flags)
+
+	// CAS update flow.
+	current, err := c.GetsWithContext(ctx, "user:1")
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = c.CASWithContext(ctx, "user:1", []byte("alice-updated"), current.Flags, 60, current.CAS)
+	if errors.Is(err, mcturbo.ErrCASConflict) {
+		log.Printf("cas conflict: retry with latest value")
+	} else if err != nil {
+		log.Fatal(err)
+	}
+
+	// GetMulti may return both result and error on partial success.
+	items, err := c.GetMultiWithContext(ctx, []string{"user:1", "user:2", "user:3"})
+	if err != nil {
+		if me, ok := errors.AsType[*mcturbo.MultiError](err); ok {
+			log.Printf("getmulti partial failure: %d servers failed", len(me.PerServer))
+		} else {
+			log.Fatal(err)
+		}
+	}
+	for k, v := range items {
+		log.Printf("getmulti: key=%s value=%q flags=%d", k, string(v.Value), v.Flags)
+	}
 }
 ```
 
+## Single-Server API Summary
+
+Fast path (no context):
+- `Get`, `Gets`, `GetMulti`
+- `Set`, `Add`, `Replace`, `CAS`
+- `Append`, `Prepend`, `Delete`, `Touch`, `GetAndTouch`
+- `Incr`, `Decr`, `FlushAll`, `Ping`
+
+Context-aware path:
+- `GetWithContext`, `GetsWithContext`, `GetMultiWithContext`
+- `SetWithContext`, `AddWithContext`, `ReplaceWithContext`, `CASWithContext`
+- `AppendWithContext`, `PrependWithContext`, `DeleteWithContext`, `TouchWithContext`, `GetAndTouchWithContext`
+- `IncrWithContext`, `DecrWithContext`, `FlushAllWithContext`, `PingWithContext`
+
+Lifecycle:
+- `Close()`
+
+### Timeout and Cancellation
+
+- `*WithContext` methods use `context` as the source of truth.
+- Fast-path methods do not accept `context`.
+- `WithDefaultDeadline(d)` sets a fallback socket deadline when you do not pass context.
+- `WithMaxSlots(n)` limits per-worker concurrency (`0` = unlimited).
+
+### Performance Tips
+
+- Prefer fast-path methods when you do not need per-call cancellation/deadline.
+- Reuse one client instance; do not create/close clients per request.
+- Tune `WithWorkers(n)` based on your CPU and request concurrency.
+- Start with `WithMaxSlots(0)` (unlimited), then set a limit only when protecting backend load.
+- Keep value sizes moderate and avoid very large hot keys.
+- Use `GetMulti` for multi-key reads to reduce network round trips.
+- Use context deadlines only where needed; overly short deadlines can increase retries and error handling cost.
+- Benchmark with your real key/value size distribution before changing defaults.
+
 ## Cluster Client
 
-`cluster.Cluster` routes keys to shards and delegates operations to existing `mcturbo.Client` methods.
+`cluster.Cluster` routes each key to one shard and calls the existing `mcturbo.Client` methods internally.
 
-### Routing Features
+### Routing Options
 
 - Distribution:
   - `DistributionModula` (default)
@@ -113,59 +128,79 @@ func main() {
   - `HashDefault` (default)
   - `HashMD5`
   - `HashCRC32`
-- Libketama compatibility:
-  - `WithLibketamaCompatible(true)` forces
+- Libketama-compatible mode:
+  - `WithLibketamaCompatible(true)` forces:
     - distribution = consistent
     - hash = MD5
-    - weighted Ketama behavior
 
-### Important Defaults
+### Server Update Behavior
 
-- Default distribution is `MODULA` (not Ketama).
-- Default hash is `DEFAULT`.
-- Default libketama mode is disabled.
+- `UpdateServers` rebuilds routing.
+- Existing shard clients are reused when `Addr` is unchanged.
+- Removed shard clients are closed.
+- Key movement can happen after server updates.
 
-### Behavior Policy
+### Failover Behavior (Optional)
 
-- No automatic failover to another server by default.
-- `UpdateServers` may move keys.
-- Shards with unchanged `Addr` are reused.
-- Removed shards are closed.
-- Optional failover (temporary auto-eject) is enabled by:
-  - `WithRemoveFailedServers(true)` (default: `false`)
-  - `WithServerFailureLimit(n)` (default: `2`)
-  - `WithRetryTimeout(d)` (default: `2s`)
-- Failover is only used for communication-level failures:
-  - network close (`io.EOF`, `net.ErrClosed`)
+Default:
+- no failover
+
+Enable temporary auto-eject:
+- `WithRemoveFailedServers(true)`
+- `WithServerFailureLimit(n)` (default: `2`)
+- `WithRetryTimeout(d)` (default: `2s`)
+
+When enabled:
+- Retry to next shard only for communication failures:
+  - `io.EOF`, `net.ErrClosed`
   - timeout/non-temporary `net.Error`
   - protocol parse errors (`mcturbo.IsProtocolError(err)`)
-- Failover is not used for semantic errors:
-  - `ErrNotFound`
-  - `ErrNotStored`
-  - `ErrCASConflict`
-- If all servers are temporarily ejected, the cluster falls back to trying all servers.
-- `GetMulti` keeps partial-success semantics (`result` and `error` can both be non-nil).
+- No failover for semantic errors:
+  - `ErrNotFound`, `ErrNotStored`, `ErrCASConflict`
+- If all shards are temporarily ejected, the cluster falls back to trying all shards.
 
-### Cluster APIs
+`GetMulti` note:
+- It keeps partial-success semantics (`result` and `error` can both be non-nil).
+
+### Cluster Performance Tips
+
+- Keep server weights close to actual capacity to avoid shard hotspots.
+- Use `DistributionConsistent` for smoother key movement during `UpdateServers`.
+- Enable failover only when needed; each retry can add latency on failure paths.
+- Use `GetMulti` for read-heavy fan-out access patterns.
+
+## Cluster API Summary
 
 Context-aware path:
-- `GetWithContext`, `GetsWithContext`, `GetMultiWithContext`, `SetWithContext`, `AddWithContext`, `ReplaceWithContext`, `CASWithContext`, `AppendWithContext`, `PrependWithContext`, `DeleteWithContext`, `TouchWithContext`, `GetAndTouchWithContext`, `IncrWithContext`, `DecrWithContext`, `FlushAllWithContext`, `PingWithContext`
+- `GetWithContext`, `GetsWithContext`, `GetMultiWithContext`
+- `SetWithContext`, `AddWithContext`, `ReplaceWithContext`, `CASWithContext`
+- `AppendWithContext`, `PrependWithContext`, `DeleteWithContext`, `TouchWithContext`, `GetAndTouchWithContext`
+- `IncrWithContext`, `DecrWithContext`, `FlushAllWithContext`, `PingWithContext`
 
 Fast path:
-- `Get`, `Gets`, `GetMulti`, `Set`, `Add`, `Replace`, `CAS`, `Append`, `Prepend`, `Delete`, `Touch`, `GetAndTouch`, `Incr`, `Decr`, `FlushAll`, `Ping`
-- Explicit aliases: `GetNoContext`, `GetsNoContext`, `SetNoContext`, `AddNoContext`, `ReplaceNoContext`, `CASNoContext`, `AppendNoContext`, `PrependNoContext`, `DeleteNoContext`, `TouchNoContext`, `GetAndTouchNoContext`, `IncrNoContext`, `DecrNoContext`, `FlushAllNoContext`, `PingNoContext`
+- `Get`, `Gets`, `GetMulti`
+- `Set`, `Add`, `Replace`, `CAS`
+- `Append`, `Prepend`, `Delete`, `Touch`, `GetAndTouch`
+- `Incr`, `Decr`, `FlushAll`, `Ping`
+
+No-context aliases:
+- `GetNoContext`, `GetsNoContext`, `GetMulti`
+- `SetNoContext`, `AddNoContext`, `ReplaceNoContext`, `CASNoContext`
+- `AppendNoContext`, `PrependNoContext`, `DeleteNoContext`, `TouchNoContext`, `GetAndTouchNoContext`
+- `IncrNoContext`, `DecrNoContext`, `FlushAllNoContext`, `PingNoContext`
 
 Management:
 - `UpdateServers([]Server)`
 - `Close()`
 
-### Cluster Example (Consistent + MD5)
+## Example (Cluster)
 
 ```go
 package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -179,33 +214,52 @@ func main() {
 			{Addr: "127.0.0.1:11211", Weight: 1},
 			{Addr: "127.0.0.1:11212", Weight: 1},
 		},
-		cluster.WithDistribution(cluster.DistributionConsistent),
+		cluster.WithDistribution(cluster.DistributionConsistent), // explicit ketama
 		cluster.WithHash(cluster.HashMD5),
-		cluster.WithBaseClientOptions(
-			mcturbo.WithWorkers(4),
-		),
+		cluster.WithBaseClientOptions(mcturbo.WithWorkers(4)),
+		cluster.WithRemoveFailedServers(true), // optional failover
+		cluster.WithServerFailureLimit(2),
+		cluster.WithRetryTimeout(2*time.Second),
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer c.Close()
 
-	if err := c.SetNoContext("k1", []byte("value"), 0, 10); err != nil {
+	// No-context API.
+	if err := c.SetNoContext("session:42", []byte("token"), 0, 120); err != nil {
+		log.Fatal(err)
+	}
+	if err := c.PingNoContext(); err != nil {
 		log.Fatal(err)
 	}
 
+	// Context-aware API.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	v, err := c.GetWithContext(ctx, "k1")
+	it, err := c.GetWithContext(ctx, "session:42")
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("value=%s flags=%d", string(v.Value), v.Flags)
+	log.Printf("cluster get: value=%q flags=%d", string(it.Value), it.Flags)
+
+	// Cluster GetMulti also allows partial success.
+	items, err := c.GetMultiWithContext(ctx, []string{"session:42", "session:43"})
+	if err != nil {
+		if me, ok := errors.AsType[*mcturbo.MultiError](err); ok {
+			log.Printf("cluster getmulti partial failure: %d servers failed", len(me.PerServer))
+		} else {
+			log.Fatal(err)
+		}
+	}
+	for k, v := range items {
+		log.Printf("cluster getmulti: key=%s value=%q", k, string(v.Value))
+	}
 }
 ```
 
-## Testing
+## Test
 
 Unit tests:
 
