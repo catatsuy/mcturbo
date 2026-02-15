@@ -80,7 +80,7 @@ func TestIntegrationSetGetDeleteTTL(t *testing.T) {
 	c := newIntegrationClient(t)
 	defer c.Close()
 
-	if err := c.Set("int:key1", []byte("abc"), 5); err != nil {
+	if err := c.Set("int:key1", []byte("abc"), 0, 5); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	v, err := c.Get("int:key1")
@@ -99,7 +99,7 @@ func TestIntegrationSetGetDeleteTTL(t *testing.T) {
 		t.Fatalf("expected not found after delete, got %v", err)
 	}
 
-	if err := c.Set("int:ttl", []byte("x"), 1); err != nil {
+	if err := c.Set("int:ttl", []byte("x"), 0, 1); err != nil {
 		t.Fatalf("set ttl: %v", err)
 	}
 	time.Sleep(1300 * time.Millisecond)
@@ -116,7 +116,7 @@ func TestIntegrationLargeAndMultilineValue(t *testing.T) {
 	payload := bytes.Repeat([]byte("0123456789abcdef"), 60000)
 	payload = append(payload, []byte("\nline\nvalue\n")...)
 
-	if err := c.Set("int:large", payload, 5); err != nil {
+	if err := c.Set("int:large", payload, 0, 5); err != nil {
 		t.Fatalf("set large: %v", err)
 	}
 	got, err := c.Get("int:large")
@@ -134,7 +134,7 @@ func TestIntegrationContextDeadline(t *testing.T) {
 
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	if err := c.SetWithContext(ctx, "int:past", []byte("x"), 5); !errors.Is(err, context.DeadlineExceeded) {
+	if err := c.SetWithContext(ctx, "int:past", []byte("x"), 0, 5); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected deadline exceeded, got %v", err)
 	}
 }
@@ -143,7 +143,7 @@ func TestIntegrationIncrDecr(t *testing.T) {
 	c := newIntegrationClient(t)
 	defer c.Close()
 
-	if err := c.Set("int:counter", []byte("10"), 10); err != nil {
+	if err := c.Set("int:counter", []byte("10"), 0, 10); err != nil {
 		t.Fatalf("set counter: %v", err)
 	}
 	n, err := c.Incr("int:counter", 5)
@@ -177,13 +177,13 @@ func TestIntegrationExtendedStoreCommands(t *testing.T) {
 	defer c.Close()
 
 	_ = c.Delete("int:add")
-	if err := c.Add("int:add", []byte("a"), 10); err != nil {
+	if err := c.Add("int:add", []byte("a"), 0, 10); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if err := c.Add("int:add", []byte("b"), 10); !errors.Is(err, ErrNotStored) {
+	if err := c.Add("int:add", []byte("b"), 0, 10); !errors.Is(err, ErrNotStored) {
 		t.Fatalf("second add should be not stored: %v", err)
 	}
-	if err := c.Replace("int:add", []byte("r"), 10); err != nil {
+	if err := c.Replace("int:add", []byte("r"), 0, 10); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
 	if err := c.Append("int:add", []byte("x")); err != nil {

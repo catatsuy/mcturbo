@@ -104,7 +104,7 @@ func BenchmarkSetSmall(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			k := keysMCT[i%keyCount]
-			if err := c.Set(k, payload, 60); err != nil {
+			if err := c.Set(k, payload, 0, 60); err != nil {
 				b.Fatalf("set: %v", err)
 			}
 		}
@@ -275,7 +275,7 @@ func BenchmarkDeleteHit(b *testing.B) {
 			if err != nil && !errors.Is(err, mcturbo.ErrNotFound) {
 				b.Fatalf("delete: %v", err)
 			}
-			if err := c.Set(k, value, 60); err != nil {
+			if err := c.Set(k, value, 0, 60); err != nil {
 				b.Fatalf("set: %v", err)
 			}
 		}

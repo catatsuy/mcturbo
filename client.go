@@ -282,57 +282,48 @@ func (c *Client) GetMulti(ctx context.Context, keys []string) (map[string]*Item,
 	return out, nil
 }
 
-// Set stores value for key with ttlSeconds.
-func (c *Client) Set(key string, value []byte, ttlSeconds int) error {
-	if err := validateKey(key); err != nil {
+// Set stores value for key with flags and ttlSeconds.
+func (c *Client) Set(key string, value []byte, flags uint32, ttlSeconds int) error {
+	if err := validateStoreInput(key, ttlSeconds); err != nil {
 		return err
 	}
-	if ttlSeconds < 0 {
-		return errors.New("memcache: ttlSeconds must be >= 0")
-	}
-	_, err := c.doFast(opSet, key, value, ttlSeconds, 0)
+	_, err := c.doFast(opSet, key, value, flags, ttlSeconds, 0)
 	return err
 }
 
 // Add stores value for key only if key does not exist.
-func (c *Client) Add(key string, value []byte, ttlSeconds int) error {
-	if err := validateKey(key); err != nil {
+func (c *Client) Add(key string, value []byte, flags uint32, ttlSeconds int) error {
+	if err := validateStoreInput(key, ttlSeconds); err != nil {
 		return err
 	}
-	if ttlSeconds < 0 {
-		return errors.New("memcache: ttlSeconds must be >= 0")
-	}
-	_, err := c.doFast(opAdd, key, value, ttlSeconds, 0)
+	_, err := c.doFast(opAdd, key, value, flags, ttlSeconds, 0)
 	return err
 }
 
 // Replace stores value for key only if key already exists.
-func (c *Client) Replace(key string, value []byte, ttlSeconds int) error {
-	if err := validateKey(key); err != nil {
+func (c *Client) Replace(key string, value []byte, flags uint32, ttlSeconds int) error {
+	if err := validateStoreInput(key, ttlSeconds); err != nil {
 		return err
 	}
-	if ttlSeconds < 0 {
-		return errors.New("memcache: ttlSeconds must be >= 0")
-	}
-	_, err := c.doFast(opReplace, key, value, ttlSeconds, 0)
+	_, err := c.doFast(opReplace, key, value, flags, ttlSeconds, 0)
 	return err
 }
 
-// Append appends value to the existing value for key.
+// Append appends value to existing value for key.
 func (c *Client) Append(key string, value []byte) error {
 	if err := validateKey(key); err != nil {
 		return err
 	}
-	_, err := c.doFast(opAppend, key, value, 0, 0)
+	_, err := c.doFast(opAppend, key, value, 0, 0, 0)
 	return err
 }
 
-// Prepend prepends value to the existing value for key.
+// Prepend prepends value to existing value for key.
 func (c *Client) Prepend(key string, value []byte) error {
 	if err := validateKey(key); err != nil {
 		return err
 	}
-	_, err := c.doFast(opPrepend, key, value, 0, 0)
+	_, err := c.doFast(opPrepend, key, value, 0, 0, 0)
 	return err
 }
 
@@ -341,7 +332,7 @@ func (c *Client) Delete(key string) error {
 	if err := validateKey(key); err != nil {
 		return err
 	}
-	_, err := c.doFast(opDelete, key, nil, 0, 0)
+	_, err := c.doFast(opDelete, key, nil, 0, 0, 0)
 	return err
 }
 
@@ -353,7 +344,7 @@ func (c *Client) Touch(key string, ttlSeconds int) error {
 	if ttlSeconds < 0 {
 		return errors.New("memcache: ttlSeconds must be >= 0")
 	}
-	_, err := c.doFast(opTouch, key, nil, ttlSeconds, 0)
+	_, err := c.doFast(opTouch, key, nil, 0, ttlSeconds, 0)
 	return err
 }
 
@@ -373,7 +364,7 @@ func (c *Client) Incr(key string, delta uint64) (uint64, error) {
 	if err := validateKey(key); err != nil {
 		return 0, err
 	}
-	v, err := c.doFast(opIncr, key, nil, 0, delta)
+	v, err := c.doFast(opIncr, key, nil, 0, 0, delta)
 	if err != nil {
 		return 0, err
 	}
@@ -385,7 +376,7 @@ func (c *Client) Decr(key string, delta uint64) (uint64, error) {
 	if err := validateKey(key); err != nil {
 		return 0, err
 	}
-	v, err := c.doFast(opDecr, key, nil, 0, delta)
+	v, err := c.doFast(opDecr, key, nil, 0, 0, delta)
 	if err != nil {
 		return 0, err
 	}
@@ -415,52 +406,43 @@ func (c *Client) GetWithContext(ctx context.Context, key string) (*Item, error) 
 	return c.doGetWithContext(ctx, opGet, key, 0)
 }
 
-// SetWithContext stores value for key with ttlSeconds using ctx.
-func (c *Client) SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
-	if err := validateKey(key); err != nil {
+// SetWithContext stores value for key with flags and ttlSeconds using ctx.
+func (c *Client) SetWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error {
+	if err := validateStoreInput(key, ttlSeconds); err != nil {
 		return err
-	}
-	if ttlSeconds < 0 {
-		return errors.New("memcache: ttlSeconds must be >= 0")
 	}
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opSet, key, value, ttlSeconds, 0)
+	_, err := c.doWithContext(ctx, opSet, key, value, flags, ttlSeconds, 0)
 	return err
 }
 
 // AddWithContext stores value for key only if key does not exist.
-func (c *Client) AddWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
-	if err := validateKey(key); err != nil {
+func (c *Client) AddWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error {
+	if err := validateStoreInput(key, ttlSeconds); err != nil {
 		return err
-	}
-	if ttlSeconds < 0 {
-		return errors.New("memcache: ttlSeconds must be >= 0")
 	}
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opAdd, key, value, ttlSeconds, 0)
+	_, err := c.doWithContext(ctx, opAdd, key, value, flags, ttlSeconds, 0)
 	return err
 }
 
 // ReplaceWithContext stores value for key only if key already exists.
-func (c *Client) ReplaceWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
-	if err := validateKey(key); err != nil {
+func (c *Client) ReplaceWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error {
+	if err := validateStoreInput(key, ttlSeconds); err != nil {
 		return err
-	}
-	if ttlSeconds < 0 {
-		return errors.New("memcache: ttlSeconds must be >= 0")
 	}
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opReplace, key, value, ttlSeconds, 0)
+	_, err := c.doWithContext(ctx, opReplace, key, value, flags, ttlSeconds, 0)
 	return err
 }
 
-// AppendWithContext appends value to the existing value for key.
+// AppendWithContext appends value to existing value for key.
 func (c *Client) AppendWithContext(ctx context.Context, key string, value []byte) error {
 	if err := validateKey(key); err != nil {
 		return err
@@ -468,11 +450,11 @@ func (c *Client) AppendWithContext(ctx context.Context, key string, value []byte
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opAppend, key, value, 0, 0)
+	_, err := c.doWithContext(ctx, opAppend, key, value, 0, 0, 0)
 	return err
 }
 
-// PrependWithContext prepends value to the existing value for key.
+// PrependWithContext prepends value to existing value for key.
 func (c *Client) PrependWithContext(ctx context.Context, key string, value []byte) error {
 	if err := validateKey(key); err != nil {
 		return err
@@ -480,7 +462,7 @@ func (c *Client) PrependWithContext(ctx context.Context, key string, value []byt
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opPrepend, key, value, 0, 0)
+	_, err := c.doWithContext(ctx, opPrepend, key, value, 0, 0, 0)
 	return err
 }
 
@@ -492,7 +474,7 @@ func (c *Client) DeleteWithContext(ctx context.Context, key string) error {
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opDelete, key, nil, 0, 0)
+	_, err := c.doWithContext(ctx, opDelete, key, nil, 0, 0, 0)
 	return err
 }
 
@@ -507,7 +489,7 @@ func (c *Client) TouchWithContext(ctx context.Context, key string, ttlSeconds in
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opTouch, key, nil, ttlSeconds, 0)
+	_, err := c.doWithContext(ctx, opTouch, key, nil, 0, ttlSeconds, 0)
 	return err
 }
 
@@ -533,7 +515,7 @@ func (c *Client) IncrWithContext(ctx context.Context, key string, delta uint64) 
 	if ctx == nil {
 		return 0, errors.New("memcache: nil context")
 	}
-	v, err := c.doWithContext(ctx, opIncr, key, nil, 0, delta)
+	v, err := c.doWithContext(ctx, opIncr, key, nil, 0, 0, delta)
 	if err != nil {
 		return 0, err
 	}
@@ -548,7 +530,7 @@ func (c *Client) DecrWithContext(ctx context.Context, key string, delta uint64) 
 	if ctx == nil {
 		return 0, errors.New("memcache: nil context")
 	}
-	v, err := c.doWithContext(ctx, opDecr, key, nil, 0, delta)
+	v, err := c.doWithContext(ctx, opDecr, key, nil, 0, 0, delta)
 	if err != nil {
 		return 0, err
 	}
@@ -585,12 +567,12 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func (c *Client) doFast(op opType, key string, value []byte, ttl int, delta uint64) ([]byte, error) {
+func (c *Client) doFast(op opType, key string, value []byte, flags uint32, ttl int, delta uint64) ([]byte, error) {
 	if c.closed.Load() {
 		return nil, ErrClosed
 	}
 	w := c.pickWorker(key)
-	return w.roundTripFast(request{op: op, key: key, value: value, ttl: ttl, delta: delta})
+	return w.roundTripFast(request{op: op, key: key, value: value, flags: flags, ttl: ttl, delta: delta})
 }
 
 func (c *Client) doGetFast(op opType, key string, ttl int) (*Item, error) {
@@ -598,7 +580,11 @@ func (c *Client) doGetFast(op opType, key string, ttl int) (*Item, error) {
 		return nil, ErrClosed
 	}
 	w := c.pickWorker(key)
-	return w.roundTripGetFast(request{op: op, key: key, ttl: ttl})
+	it, err := w.roundTripGetFast(request{op: op, key: key, ttl: ttl})
+	if err != nil {
+		return nil, err
+	}
+	return it, nil
 }
 
 func (c *Client) doFastNoKey(op opType) ([]byte, error) {
@@ -611,7 +597,7 @@ func (c *Client) doFastNoKey(op opType) ([]byte, error) {
 	return c.workers[0].roundTripFast(request{op: op})
 }
 
-func (c *Client) doWithContext(ctx context.Context, op opType, key string, value []byte, ttl int, delta uint64) ([]byte, error) {
+func (c *Client) doWithContext(ctx context.Context, op opType, key string, value []byte, flags uint32, ttl int, delta uint64) ([]byte, error) {
 	if c.closed.Load() {
 		return nil, ErrClosed
 	}
@@ -619,7 +605,7 @@ func (c *Client) doWithContext(ctx context.Context, op opType, key string, value
 		return nil, err
 	}
 	w := c.pickWorker(key)
-	v, err := w.roundTripWithContext(ctx, request{op: op, key: key, value: value, ttl: ttl, delta: delta})
+	v, err := w.roundTripWithContext(ctx, request{op: op, key: key, value: value, flags: flags, ttl: ttl, delta: delta})
 	if err != nil {
 		return nil, err
 	}
@@ -704,6 +690,7 @@ type request struct {
 	op    opType
 	key   string
 	value []byte
+	flags uint32
 	ttl   int
 	delta uint64
 }
@@ -1115,7 +1102,13 @@ func writeRequest(bw *bufio.Writer, req request) error {
 		if _, err := bw.WriteString(req.key); err != nil {
 			return err
 		}
-		if _, err := bw.WriteString(" 0 "); err != nil {
+		if _, err := bw.WriteString(" "); err != nil {
+			return err
+		}
+		if err := writeUint32Decimal(bw, req.flags); err != nil {
+			return err
+		}
+		if _, err := bw.WriteString(" "); err != nil {
 			return err
 		}
 		if err := writeUintDecimal(bw, req.ttl); err != nil {
@@ -1644,6 +1637,10 @@ func parseUint32(b []byte) (uint32, error) {
 	return uint32(v), nil
 }
 
+func writeUint32Decimal(bw *bufio.Writer, n uint32) error {
+	return writeUint64Decimal(bw, uint64(n))
+}
+
 func writeUint64Decimal(bw *bufio.Writer, n uint64) error {
 	if n == 0 {
 		return bw.WriteByte('0')
@@ -1675,6 +1672,16 @@ func validateKey(key string) error {
 		if b <= 0x20 || b == 0x7f {
 			return errors.New("memcache: key contains invalid character")
 		}
+	}
+	return nil
+}
+
+func validateStoreInput(key string, ttlSeconds int) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	if ttlSeconds < 0 {
+		return errors.New("memcache: ttlSeconds must be >= 0")
 	}
 	return nil
 }

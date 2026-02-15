@@ -104,7 +104,7 @@ func TestIntegrationModulaSetGet(t *testing.T) {
 	c := newIntegrationCluster(t, WithDistribution(DistributionModula))
 	defer c.Close()
 
-	if err := c.SetNoContext("cluster:modula:nc", []byte("nc-v"), 5); err != nil {
+	if err := c.SetNoContext("cluster:modula:nc", []byte("nc-v"), 0, 5); err != nil {
 		t.Fatalf("set no context: %v", err)
 	}
 	v, err := c.GetNoContext("cluster:modula:nc")
@@ -117,7 +117,7 @@ func TestIntegrationModulaSetGet(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := c.SetWithContext(ctx, "cluster:modula:ctx", []byte("ctx-v"), 5); err != nil {
+	if err := c.SetWithContext(ctx, "cluster:modula:ctx", []byte("ctx-v"), 0, 5); err != nil {
 		t.Fatalf("set with context: %v", err)
 	}
 	v, err = c.GetWithContext(ctx, "cluster:modula:ctx")
@@ -128,10 +128,10 @@ func TestIntegrationModulaSetGet(t *testing.T) {
 		t.Fatalf("unexpected value: %q", string(v.Value))
 	}
 
-	if err := c.AddNoContext("cluster:modula:add", []byte("a"), 5); err != nil {
+	if err := c.AddNoContext("cluster:modula:add", []byte("a"), 0, 5); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if err := c.ReplaceNoContext("cluster:modula:add", []byte("b"), 5); err != nil {
+	if err := c.ReplaceNoContext("cluster:modula:add", []byte("b"), 0, 5); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
 	if err := c.AppendNoContext("cluster:modula:add", []byte("x")); err != nil {
@@ -153,14 +153,14 @@ func TestIntegrationConsistentSetGet(t *testing.T) {
 	c := newIntegrationCluster(t, WithDistribution(DistributionConsistent), WithHash(HashMD5))
 	defer c.Close()
 
-	if err := c.SetNoContext("cluster:consistent:nc", []byte("v"), 5); err != nil {
+	if err := c.SetNoContext("cluster:consistent:nc", []byte("v"), 0, 5); err != nil {
 		t.Fatalf("set no context: %v", err)
 	}
 	if _, err := c.GetNoContext("cluster:consistent:nc"); err != nil {
 		t.Fatalf("get no context: %v", err)
 	}
 
-	if err := c.SetNoContext("cluster:consistent:counter", []byte("10"), 5); err != nil {
+	if err := c.SetNoContext("cluster:consistent:counter", []byte("10"), 0, 5); err != nil {
 		t.Fatalf("set counter: %v", err)
 	}
 	n, err := c.IncrNoContext("cluster:consistent:counter", 2)
@@ -214,7 +214,7 @@ func TestIntegrationDistribution(t *testing.T) {
 	const keyN = 120
 	for i := 0; i < keyN; i++ {
 		k := fmt.Sprintf("cluster:dist:%d", i)
-		if err := c.SetNoContext(k, []byte("v"), 30); err != nil {
+		if err := c.SetNoContext(k, []byte("v"), 0, 30); err != nil {
 			t.Fatalf("cluster set: %v", err)
 		}
 	}
@@ -260,7 +260,7 @@ func TestIntegrationUpdateServers(t *testing.T) {
 	}
 	defer c.Close()
 
-	if err := c.SetNoContext("cluster:update:before", []byte("v1"), 30); err != nil {
+	if err := c.SetNoContext("cluster:update:before", []byte("v1"), 0, 30); err != nil {
 		t.Fatalf("set before update: %v", err)
 	}
 	if _, err := c.GetNoContext("cluster:update:before"); err != nil {
@@ -273,7 +273,7 @@ func TestIntegrationUpdateServers(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := c.SetWithContext(ctx, "cluster:update:after", []byte("v2"), 30); err != nil {
+	if err := c.SetWithContext(ctx, "cluster:update:after", []byte("v2"), 0, 30); err != nil {
 		t.Fatalf("set after update: %v", err)
 	}
 	if _, err := c.GetWithContext(ctx, "cluster:update:after"); err != nil {
