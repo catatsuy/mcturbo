@@ -74,6 +74,14 @@ func TestClientBasicCommands(t *testing.T) {
 			}
 			switch parts[0] {
 			case "set":
+				fallthrough
+			case "add":
+				fallthrough
+			case "replace":
+				fallthrough
+			case "append":
+				fallthrough
+			case "prepend":
 				if len(parts) != 5 {
 					_, _ = bw.WriteString("CLIENT_ERROR bad\r\n")
 					_ = bw.Flush()
@@ -86,7 +94,46 @@ func TestClientBasicCommands(t *testing.T) {
 				}
 				v := append([]byte(nil), buf[:n]...)
 				mu.Lock()
-				data[parts[1]] = v
+				old, exists := data[parts[1]]
+				switch parts[0] {
+				case "add":
+					if exists {
+						mu.Unlock()
+						_, _ = bw.WriteString("NOT_STORED\r\n")
+						_ = bw.Flush()
+						continue
+					}
+					data[parts[1]] = v
+				case "replace":
+					if !exists {
+						mu.Unlock()
+						_, _ = bw.WriteString("NOT_STORED\r\n")
+						_ = bw.Flush()
+						continue
+					}
+					data[parts[1]] = v
+				case "append":
+					if !exists {
+						mu.Unlock()
+						_, _ = bw.WriteString("NOT_STORED\r\n")
+						_ = bw.Flush()
+						continue
+					}
+					data[parts[1]] = append(old, v...)
+				case "prepend":
+					if !exists {
+						mu.Unlock()
+						_, _ = bw.WriteString("NOT_STORED\r\n")
+						_ = bw.Flush()
+						continue
+					}
+					nv := make([]byte, 0, len(v)+len(old))
+					nv = append(nv, v...)
+					nv = append(nv, old...)
+					data[parts[1]] = nv
+				default:
+					data[parts[1]] = v
+				}
 				mu.Unlock()
 				_, _ = bw.WriteString("STORED\r\n")
 				_ = bw.Flush()
@@ -132,6 +179,29 @@ func TestClientBasicCommands(t *testing.T) {
 				} else {
 					_, _ = bw.WriteString("NOT_FOUND\r\n")
 				}
+				_ = bw.Flush()
+			case "gat":
+				if len(parts) != 3 {
+					return
+				}
+				mu.Lock()
+				v, ok := data[parts[2]]
+				mu.Unlock()
+				if ok {
+					_, _ = bw.WriteString(fmt.Sprintf("VALUE %s 0 %d\r\n", parts[2], len(v)))
+					_, _ = bw.Write(v)
+					_, _ = bw.WriteString("\r\n")
+				}
+				_, _ = bw.WriteString("END\r\n")
+				_ = bw.Flush()
+			case "version":
+				_, _ = bw.WriteString("VERSION test\r\n")
+				_ = bw.Flush()
+			case "flush_all":
+				mu.Lock()
+				data = map[string][]byte{}
+				mu.Unlock()
+				_, _ = bw.WriteString("OK\r\n")
 				_ = bw.Flush()
 			case "incr", "decr":
 				if len(parts) != 3 {
@@ -185,6 +255,32 @@ func TestClientBasicCommands(t *testing.T) {
 	if err := c.Set("k1", []byte("value-1"), 10); err != nil {
 		t.Fatalf("set: %v", err)
 	}
+	if err := c.Add("k2", []byte("v2"), 10); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := c.Add("k2", []byte("x"), 10); !errors.Is(err, ErrNotStored) {
+		t.Fatalf("second add should return ErrNotStored: %v", err)
+	}
+	if err := c.Replace("k2", []byte("r2"), 10); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if err := c.Append("k2", []byte("A")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := c.Prepend("k2", []byte("B")); err != nil {
+		t.Fatalf("prepend: %v", err)
+	}
+	v2, err := c.GetAndTouch("k2", 20)
+	if err != nil {
+		t.Fatalf("get and touch: %v", err)
+	}
+	if string(v2) != "Br2A" {
+		t.Fatalf("unexpected merged value: %q", string(v2))
+	}
+	if err := c.Ping(); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+
 	v, err := c.Get("k1")
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -234,6 +330,13 @@ func TestClientBasicCommands(t *testing.T) {
 	}
 	if n != 3 {
 		t.Fatalf("decr with context value mismatch: %d", n)
+	}
+	if err := c.FlushAll(); err != nil {
+		t.Fatalf("flush all: %v", err)
+	}
+	_, err = c.Get("counter")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected not found after flush all: %v", err)
 	}
 }
 
