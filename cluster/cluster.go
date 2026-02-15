@@ -25,14 +25,24 @@ type Server struct {
 type shardClient interface {
 	Get(key string) ([]byte, error)
 	Set(key string, value []byte, ttlSeconds int) error
+	Add(key string, value []byte, ttlSeconds int) error
+	Replace(key string, value []byte, ttlSeconds int) error
+	Append(key string, value []byte) error
+	Prepend(key string, value []byte) error
 	Delete(key string) error
 	Touch(key string, ttlSeconds int) error
+	GetAndTouch(key string, ttlSeconds int) ([]byte, error)
 	Incr(key string, delta uint64) (uint64, error)
 	Decr(key string, delta uint64) (uint64, error)
 	GetWithContext(ctx context.Context, key string) ([]byte, error)
 	SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error
+	AddWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error
+	ReplaceWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error
+	AppendWithContext(ctx context.Context, key string, value []byte) error
+	PrependWithContext(ctx context.Context, key string, value []byte) error
 	DeleteWithContext(ctx context.Context, key string) error
 	TouchWithContext(ctx context.Context, key string, ttlSeconds int) error
+	GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) ([]byte, error)
 	IncrWithContext(ctx context.Context, key string, delta uint64) (uint64, error)
 	DecrWithContext(ctx context.Context, key string, delta uint64) (uint64, error)
 	Close() error
@@ -104,6 +114,42 @@ func (c *Cluster) Set(key string, value []byte, ttlSeconds int) error {
 	return shard.Set(key, value, ttlSeconds)
 }
 
+// Add stores value for key only if key does not exist.
+func (c *Cluster) Add(key string, value []byte, ttlSeconds int) error {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return err
+	}
+	return shard.Add(key, value, ttlSeconds)
+}
+
+// Replace stores value for key only if key already exists.
+func (c *Cluster) Replace(key string, value []byte, ttlSeconds int) error {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return err
+	}
+	return shard.Replace(key, value, ttlSeconds)
+}
+
+// Append appends value to existing key value.
+func (c *Cluster) Append(key string, value []byte) error {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return err
+	}
+	return shard.Append(key, value)
+}
+
+// Prepend prepends value to existing key value.
+func (c *Cluster) Prepend(key string, value []byte) error {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return err
+	}
+	return shard.Prepend(key, value)
+}
+
 // Delete removes key.
 func (c *Cluster) Delete(key string) error {
 	shard, err := c.pickShard(key)
@@ -120,6 +166,15 @@ func (c *Cluster) Touch(key string, ttlSeconds int) error {
 		return err
 	}
 	return shard.Touch(key, ttlSeconds)
+}
+
+// GetAndTouch gets key and updates key expiration to ttlSeconds.
+func (c *Cluster) GetAndTouch(key string, ttlSeconds int) ([]byte, error) {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return nil, err
+	}
+	return shard.GetAndTouch(key, ttlSeconds)
 }
 
 // Incr increments a numeric value by delta and returns the new value.
@@ -158,6 +213,42 @@ func (c *Cluster) SetWithContext(ctx context.Context, key string, value []byte, 
 	return shard.SetWithContext(ctx, key, value, ttlSeconds)
 }
 
+// AddWithContext stores value for key only if key does not exist.
+func (c *Cluster) AddWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return err
+	}
+	return shard.AddWithContext(ctx, key, value, ttlSeconds)
+}
+
+// ReplaceWithContext stores value for key only if key already exists.
+func (c *Cluster) ReplaceWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return err
+	}
+	return shard.ReplaceWithContext(ctx, key, value, ttlSeconds)
+}
+
+// AppendWithContext appends value to existing key value.
+func (c *Cluster) AppendWithContext(ctx context.Context, key string, value []byte) error {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return err
+	}
+	return shard.AppendWithContext(ctx, key, value)
+}
+
+// PrependWithContext prepends value to existing key value.
+func (c *Cluster) PrependWithContext(ctx context.Context, key string, value []byte) error {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return err
+	}
+	return shard.PrependWithContext(ctx, key, value)
+}
+
 // DeleteWithContext removes key using ctx.
 func (c *Cluster) DeleteWithContext(ctx context.Context, key string) error {
 	shard, err := c.pickShard(key)
@@ -174,6 +265,15 @@ func (c *Cluster) TouchWithContext(ctx context.Context, key string, ttlSeconds i
 		return err
 	}
 	return shard.TouchWithContext(ctx, key, ttlSeconds)
+}
+
+// GetAndTouchWithContext gets key and updates key expiration to ttlSeconds.
+func (c *Cluster) GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) ([]byte, error) {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return nil, err
+	}
+	return shard.GetAndTouchWithContext(ctx, key, ttlSeconds)
 }
 
 // IncrWithContext increments a numeric value by delta and returns the new value.
@@ -204,6 +304,26 @@ func (c *Cluster) SetNoContext(key string, value []byte, ttlSeconds int) error {
 	return c.Set(key, value, ttlSeconds)
 }
 
+// AddNoContext is an explicit no-context alias of Add.
+func (c *Cluster) AddNoContext(key string, value []byte, ttlSeconds int) error {
+	return c.Add(key, value, ttlSeconds)
+}
+
+// ReplaceNoContext is an explicit no-context alias of Replace.
+func (c *Cluster) ReplaceNoContext(key string, value []byte, ttlSeconds int) error {
+	return c.Replace(key, value, ttlSeconds)
+}
+
+// AppendNoContext is an explicit no-context alias of Append.
+func (c *Cluster) AppendNoContext(key string, value []byte) error {
+	return c.Append(key, value)
+}
+
+// PrependNoContext is an explicit no-context alias of Prepend.
+func (c *Cluster) PrependNoContext(key string, value []byte) error {
+	return c.Prepend(key, value)
+}
+
 // DeleteNoContext is an explicit no-context alias of Delete.
 func (c *Cluster) DeleteNoContext(key string) error {
 	return c.Delete(key)
@@ -212,6 +332,11 @@ func (c *Cluster) DeleteNoContext(key string) error {
 // TouchNoContext is an explicit no-context alias of Touch.
 func (c *Cluster) TouchNoContext(key string, ttlSeconds int) error {
 	return c.Touch(key, ttlSeconds)
+}
+
+// GetAndTouchNoContext is an explicit no-context alias of GetAndTouch.
+func (c *Cluster) GetAndTouchNoContext(key string, ttlSeconds int) ([]byte, error) {
+	return c.GetAndTouch(key, ttlSeconds)
 }
 
 // IncrNoContext is an explicit no-context alias of Incr.

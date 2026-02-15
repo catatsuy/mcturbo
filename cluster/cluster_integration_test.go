@@ -127,6 +127,26 @@ func TestIntegrationModulaSetGet(t *testing.T) {
 	if string(v) != "ctx-v" {
 		t.Fatalf("unexpected value: %q", string(v))
 	}
+
+	if err := c.AddNoContext("cluster:modula:add", []byte("a"), 5); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := c.ReplaceNoContext("cluster:modula:add", []byte("b"), 5); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if err := c.AppendNoContext("cluster:modula:add", []byte("x")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := c.PrependNoContext("cluster:modula:add", []byte("y")); err != nil {
+		t.Fatalf("prepend: %v", err)
+	}
+	v, err = c.GetAndTouchNoContext("cluster:modula:add", 6)
+	if err != nil {
+		t.Fatalf("get and touch: %v", err)
+	}
+	if string(v) != "ybx" {
+		t.Fatalf("unexpected merged value: %q", string(v))
+	}
 }
 
 func TestIntegrationConsistentSetGet(t *testing.T) {

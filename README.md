@@ -9,7 +9,7 @@ It provides:
 ## Scope
 
 - Protocol: memcached ASCII only
-- Supported commands: `get`, `set`, `delete`, `touch`, `incr`, `decr`
+- Supported commands: `get`, `set`, `delete`, `touch`
 - Not in scope: binary protocol, SASL, compression, serializer
 
 ## Single-Server Client
@@ -19,18 +19,32 @@ It provides:
 Fast path (no context):
 - `Get(key string)`
 - `Set(key string, value []byte, ttlSeconds int)`
+- `Add(key string, value []byte, ttlSeconds int)`
+- `Replace(key string, value []byte, ttlSeconds int)`
+- `Append(key string, value []byte)`
+- `Prepend(key string, value []byte)`
 - `Delete(key string)`
 - `Touch(key string, ttlSeconds int)`
+- `GetAndTouch(key string, ttlSeconds int)`
 - `Incr(key string, delta uint64)`
 - `Decr(key string, delta uint64)`
+- `FlushAll()`
+- `Ping()`
 
 Context-aware path:
 - `GetWithContext(ctx context.Context, key string)`
 - `SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int)`
+- `AddWithContext(ctx context.Context, key string, value []byte, ttlSeconds int)`
+- `ReplaceWithContext(ctx context.Context, key string, value []byte, ttlSeconds int)`
+- `AppendWithContext(ctx context.Context, key string, value []byte)`
+- `PrependWithContext(ctx context.Context, key string, value []byte)`
 - `DeleteWithContext(ctx context.Context, key string)`
 - `TouchWithContext(ctx context.Context, key string, ttlSeconds int)`
+- `GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int)`
 - `IncrWithContext(ctx context.Context, key string, delta uint64)`
 - `DecrWithContext(ctx context.Context, key string, delta uint64)`
+- `FlushAllWithContext(ctx context.Context)`
+- `PingWithContext(ctx context.Context)`
 
 Lifecycle:
 - `Close()`
@@ -116,11 +130,11 @@ func main() {
 ### Cluster APIs
 
 Context-aware path:
-- `GetWithContext`, `SetWithContext`, `DeleteWithContext`, `TouchWithContext`, `IncrWithContext`, `DecrWithContext`
+- `GetWithContext`, `SetWithContext`, `DeleteWithContext`, `TouchWithContext`
 
 Fast path:
-- `Get`, `Set`, `Delete`, `Touch`, `Incr`, `Decr`
-- Explicit aliases: `GetNoContext`, `SetNoContext`, `DeleteNoContext`, `TouchNoContext`, `IncrNoContext`, `DecrNoContext`
+- `Get`, `Set`, `Add`, `Replace`, `Append`, `Prepend`, `Delete`, `Touch`, `GetAndTouch`, `Incr`, `Decr`
+- Explicit aliases: `GetNoContext`, `SetNoContext`, `AddNoContext`, `ReplaceNoContext`, `AppendNoContext`, `PrependNoContext`, `DeleteNoContext`, `TouchNoContext`, `GetAndTouchNoContext`, `IncrNoContext`, `DecrNoContext`
 
 Management:
 - `UpdateServers([]Server)`

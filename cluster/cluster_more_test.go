@@ -13,16 +13,24 @@ import (
 type fakeShard struct {
 	mu sync.Mutex
 
-	getCount             int
-	setCount             int
-	deleteCount          int
-	touchCount           int
-	incrCount            int
-	decrCount            int
-	getWithContextCount  int
-	setWithContextCount  int
-	incrWithContextCount int
-	decrWithContextCount int
+	getCount                int
+	setCount                int
+	addCount                int
+	replaceCount            int
+	appendCount             int
+	prependCount            int
+	deleteCount             int
+	touchCount              int
+	incrCount               int
+	decrCount               int
+	getWithContextCount     int
+	setWithContextCount     int
+	addWithContextCount     int
+	replaceWithContextCount int
+	appendWithContextCount  int
+	prependWithContextCount int
+	incrWithContextCount    int
+	decrWithContextCount    int
 
 	getErr    error
 	setErr    error
@@ -59,6 +67,57 @@ func (s *fakeShard) Set(key string, value []byte, ttlSeconds int) error {
 	return nil
 }
 
+func (s *fakeShard) Add(key string, value []byte, ttlSeconds int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.addCount++
+	s.last = fmt.Sprintf("Add:%s:%d", key, ttlSeconds)
+	if s.setErr != nil {
+		return s.setErr
+	}
+	s.value = append([]byte(nil), value...)
+	return nil
+}
+
+func (s *fakeShard) Replace(key string, value []byte, ttlSeconds int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.replaceCount++
+	s.last = fmt.Sprintf("Replace:%s:%d", key, ttlSeconds)
+	if s.setErr != nil {
+		return s.setErr
+	}
+	s.value = append([]byte(nil), value...)
+	return nil
+}
+
+func (s *fakeShard) Append(key string, value []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendCount++
+	s.last = "Append:" + key
+	if s.setErr != nil {
+		return s.setErr
+	}
+	s.value = append(s.value, value...)
+	return nil
+}
+
+func (s *fakeShard) Prepend(key string, value []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prependCount++
+	s.last = "Prepend:" + key
+	if s.setErr != nil {
+		return s.setErr
+	}
+	nv := make([]byte, 0, len(value)+len(s.value))
+	nv = append(nv, value...)
+	nv = append(nv, s.value...)
+	s.value = nv
+	return nil
+}
+
 func (s *fakeShard) Delete(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -79,6 +138,16 @@ func (s *fakeShard) Touch(key string, ttlSeconds int) error {
 		return s.touchErr
 	}
 	return nil
+}
+
+func (s *fakeShard) GetAndTouch(key string, ttlSeconds int) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.last = fmt.Sprintf("GetAndTouch:%s:%d", key, ttlSeconds)
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	return append([]byte(nil), s.value...), nil
 }
 
 func (s *fakeShard) Incr(key string, delta uint64) (uint64, error) {
@@ -129,6 +198,87 @@ func (s *fakeShard) SetWithContext(ctx context.Context, key string, value []byte
 	return nil
 }
 
+func (s *fakeShard) AddWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.addWithContextCount++
+	s.last = fmt.Sprintf("AddWithContext:%s:%d", key, ttlSeconds)
+	if s.ctxErr != nil {
+		return s.ctxErr
+	}
+	s.value = append([]byte(nil), value...)
+	return nil
+}
+
+func (s *fakeShard) ReplaceWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.replaceWithContextCount++
+	s.last = fmt.Sprintf("ReplaceWithContext:%s:%d", key, ttlSeconds)
+	if s.ctxErr != nil {
+		return s.ctxErr
+	}
+	s.value = append([]byte(nil), value...)
+	return nil
+}
+
+func (s *fakeShard) AppendWithContext(ctx context.Context, key string, value []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendWithContextCount++
+	s.last = "AppendWithContext:" + key
+	if s.ctxErr != nil {
+		return s.ctxErr
+	}
+	s.value = append(s.value, value...)
+	return nil
+}
+
+func (s *fakeShard) PrependWithContext(ctx context.Context, key string, value []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prependWithContextCount++
+	s.last = "PrependWithContext:" + key
+	if s.ctxErr != nil {
+		return s.ctxErr
+	}
+	nv := make([]byte, 0, len(value)+len(s.value))
+	nv = append(nv, value...)
+	nv = append(nv, s.value...)
+	s.value = nv
+	return nil
+}
+
+func (s *fakeShard) DeleteWithContext(ctx context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.last = "DeleteWithContext:" + key
+	if s.ctxErr != nil {
+		return s.ctxErr
+	}
+	return nil
+}
+
+func (s *fakeShard) TouchWithContext(ctx context.Context, key string, ttlSeconds int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.last = fmt.Sprintf("TouchWithContext:%s:%d", key, ttlSeconds)
+	if s.ctxErr != nil {
+		return s.ctxErr
+	}
+	return nil
+}
+
+func (s *fakeShard) GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.last = fmt.Sprintf("GetAndTouchWithContext:%s:%d", key, ttlSeconds)
+	if s.ctxErr != nil {
+		return nil, s.ctxErr
+	}
+	return append([]byte(nil), s.value...), nil
+}
+
 func (s *fakeShard) IncrWithContext(ctx context.Context, key string, delta uint64) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,26 +302,6 @@ func (s *fakeShard) DecrWithContext(ctx context.Context, key string, delta uint6
 		return 0, nil
 	}
 	return delta - 1, nil
-}
-
-func (s *fakeShard) DeleteWithContext(ctx context.Context, key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.last = "DeleteWithContext:" + key
-	if s.ctxErr != nil {
-		return s.ctxErr
-	}
-	return nil
-}
-
-func (s *fakeShard) TouchWithContext(ctx context.Context, key string, ttlSeconds int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.last = fmt.Sprintf("TouchWithContext:%s:%d", key, ttlSeconds)
-	if s.ctxErr != nil {
-		return s.ctxErr
-	}
-	return nil
 }
 
 func (s *fakeShard) Close() error {
@@ -285,6 +415,21 @@ func TestClusterRoutingAndDelegation(t *testing.T) {
 	if target.setCount != 1 || target.setWithContextCount != 1 {
 		t.Fatalf("expected both set paths on target: set=%d setCtx=%d", target.setCount, target.setWithContextCount)
 	}
+	if err := c.AddNoContext(key, []byte("a"), 12); err != nil {
+		t.Fatalf("AddNoContext: %v", err)
+	}
+	if err := c.ReplaceWithContext(ctx, key, []byte("b"), 13); err != nil {
+		t.Fatalf("ReplaceWithContext: %v", err)
+	}
+	if err := c.AppendNoContext(key, []byte("c")); err != nil {
+		t.Fatalf("AppendNoContext: %v", err)
+	}
+	if err := c.PrependWithContext(ctx, key, []byte("d")); err != nil {
+		t.Fatalf("PrependWithContext: %v", err)
+	}
+	if _, err := c.GetAndTouchNoContext(key, 30); err != nil {
+		t.Fatalf("GetAndTouchNoContext: %v", err)
+	}
 	if _, err := c.IncrNoContext(key, 3); err != nil {
 		t.Fatalf("IncrNoContext: %v", err)
 	}
@@ -293,6 +438,9 @@ func TestClusterRoutingAndDelegation(t *testing.T) {
 	}
 	if target.incrCount != 1 || target.decrWithContextCount != 1 {
 		t.Fatalf("expected incr/decr delegation on target: incr=%d decrCtx=%d", target.incrCount, target.decrWithContextCount)
+	}
+	if target.addCount != 1 || target.replaceWithContextCount != 1 || target.appendCount != 1 || target.prependWithContextCount != 1 {
+		t.Fatalf("expected add/replace/append/prepend delegation on target")
 	}
 }
 

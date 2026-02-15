@@ -191,6 +191,48 @@ func (c *Client) Set(key string, value []byte, ttlSeconds int) error {
 	return err
 }
 
+// Add stores value for key only if key does not exist.
+func (c *Client) Add(key string, value []byte, ttlSeconds int) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	if ttlSeconds < 0 {
+		return errors.New("memcache: ttlSeconds must be >= 0")
+	}
+	_, err := c.doFast(opAdd, key, value, ttlSeconds, 0)
+	return err
+}
+
+// Replace stores value for key only if key already exists.
+func (c *Client) Replace(key string, value []byte, ttlSeconds int) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	if ttlSeconds < 0 {
+		return errors.New("memcache: ttlSeconds must be >= 0")
+	}
+	_, err := c.doFast(opReplace, key, value, ttlSeconds, 0)
+	return err
+}
+
+// Append appends value to the existing value for key.
+func (c *Client) Append(key string, value []byte) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	_, err := c.doFast(opAppend, key, value, 0, 0)
+	return err
+}
+
+// Prepend prepends value to the existing value for key.
+func (c *Client) Prepend(key string, value []byte) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	_, err := c.doFast(opPrepend, key, value, 0, 0)
+	return err
+}
+
 // Delete removes key.
 func (c *Client) Delete(key string) error {
 	if err := validateKey(key); err != nil {
@@ -210,6 +252,17 @@ func (c *Client) Touch(key string, ttlSeconds int) error {
 	}
 	_, err := c.doFast(opTouch, key, nil, ttlSeconds, 0)
 	return err
+}
+
+// GetAndTouch gets key and updates key expiration to ttlSeconds.
+func (c *Client) GetAndTouch(key string, ttlSeconds int) ([]byte, error) {
+	if err := validateKey(key); err != nil {
+		return nil, err
+	}
+	if ttlSeconds < 0 {
+		return nil, errors.New("memcache: ttlSeconds must be >= 0")
+	}
+	return c.doFast(opGetAndTouch, key, nil, ttlSeconds, 0)
 }
 
 // Incr increments a numeric value by delta and returns the new value.
@@ -234,6 +287,18 @@ func (c *Client) Decr(key string, delta uint64) (uint64, error) {
 		return 0, err
 	}
 	return parseCounterValue(v)
+}
+
+// FlushAll removes all keys from the server.
+func (c *Client) FlushAll() error {
+	_, err := c.doFastNoKey(opFlushAll)
+	return err
+}
+
+// Ping checks server availability using the version command.
+func (c *Client) Ping() error {
+	_, err := c.doFastNoKey(opVersion)
+	return err
 }
 
 // GetWithContext returns the value for key using ctx for cancellation/deadline.
@@ -262,6 +327,60 @@ func (c *Client) SetWithContext(ctx context.Context, key string, value []byte, t
 	return err
 }
 
+// AddWithContext stores value for key only if key does not exist.
+func (c *Client) AddWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	if ttlSeconds < 0 {
+		return errors.New("memcache: ttlSeconds must be >= 0")
+	}
+	if ctx == nil {
+		return errors.New("memcache: nil context")
+	}
+	_, err := c.doWithContext(ctx, opAdd, key, value, ttlSeconds, 0)
+	return err
+}
+
+// ReplaceWithContext stores value for key only if key already exists.
+func (c *Client) ReplaceWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	if ttlSeconds < 0 {
+		return errors.New("memcache: ttlSeconds must be >= 0")
+	}
+	if ctx == nil {
+		return errors.New("memcache: nil context")
+	}
+	_, err := c.doWithContext(ctx, opReplace, key, value, ttlSeconds, 0)
+	return err
+}
+
+// AppendWithContext appends value to the existing value for key.
+func (c *Client) AppendWithContext(ctx context.Context, key string, value []byte) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	if ctx == nil {
+		return errors.New("memcache: nil context")
+	}
+	_, err := c.doWithContext(ctx, opAppend, key, value, 0, 0)
+	return err
+}
+
+// PrependWithContext prepends value to the existing value for key.
+func (c *Client) PrependWithContext(ctx context.Context, key string, value []byte) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	if ctx == nil {
+		return errors.New("memcache: nil context")
+	}
+	_, err := c.doWithContext(ctx, opPrepend, key, value, 0, 0)
+	return err
+}
+
 // DeleteWithContext removes key using ctx.
 func (c *Client) DeleteWithContext(ctx context.Context, key string) error {
 	if err := validateKey(key); err != nil {
@@ -287,6 +406,20 @@ func (c *Client) TouchWithContext(ctx context.Context, key string, ttlSeconds in
 	}
 	_, err := c.doWithContext(ctx, opTouch, key, nil, ttlSeconds, 0)
 	return err
+}
+
+// GetAndTouchWithContext gets key and updates key expiration to ttlSeconds.
+func (c *Client) GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) ([]byte, error) {
+	if err := validateKey(key); err != nil {
+		return nil, err
+	}
+	if ttlSeconds < 0 {
+		return nil, errors.New("memcache: ttlSeconds must be >= 0")
+	}
+	if ctx == nil {
+		return nil, errors.New("memcache: nil context")
+	}
+	return c.doWithContext(ctx, opGetAndTouch, key, nil, ttlSeconds, 0)
 }
 
 // IncrWithContext increments a numeric value by delta and returns the new value.
@@ -319,6 +452,24 @@ func (c *Client) DecrWithContext(ctx context.Context, key string, delta uint64) 
 	return parseCounterValue(v)
 }
 
+// FlushAllWithContext removes all keys from the server using ctx.
+func (c *Client) FlushAllWithContext(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("memcache: nil context")
+	}
+	_, err := c.doWithContextNoKey(ctx, opFlushAll)
+	return err
+}
+
+// PingWithContext checks server availability using ctx.
+func (c *Client) PingWithContext(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("memcache: nil context")
+	}
+	_, err := c.doWithContextNoKey(ctx, opVersion)
+	return err
+}
+
 // Close closes the client and all internal connections.
 func (c *Client) Close() error {
 	if !c.closed.CompareAndSwap(false, true) {
@@ -339,6 +490,16 @@ func (c *Client) doFast(op opType, key string, value []byte, ttl int, delta uint
 	return w.roundTripFast(request{op: op, key: key, value: value, ttl: ttl, delta: delta})
 }
 
+func (c *Client) doFastNoKey(op opType) ([]byte, error) {
+	if c.closed.Load() {
+		return nil, ErrClosed
+	}
+	if len(c.workers) == 0 {
+		return nil, ErrClosed
+	}
+	return c.workers[0].roundTripFast(request{op: op})
+}
+
 func (c *Client) doWithContext(ctx context.Context, op opType, key string, value []byte, ttl int, delta uint64) ([]byte, error) {
 	if c.closed.Load() {
 		return nil, ErrClosed
@@ -348,6 +509,26 @@ func (c *Client) doWithContext(ctx context.Context, op opType, key string, value
 	}
 	w := c.pickWorker(key)
 	v, err := w.roundTripWithContext(ctx, request{op: op, key: key, value: value, ttl: ttl, delta: delta})
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func (c *Client) doWithContextNoKey(ctx context.Context, op opType) ([]byte, error) {
+	if c.closed.Load() {
+		return nil, ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(c.workers) == 0 {
+		return nil, ErrClosed
+	}
+	v, err := c.workers[0].roundTripWithContext(ctx, request{op: op})
 	if err != nil {
 		return nil, err
 	}
@@ -377,8 +558,15 @@ type opType uint8
 const (
 	opGet opType = iota + 1
 	opSet
+	opAdd
+	opReplace
+	opAppend
+	opPrepend
 	opDelete
 	opTouch
+	opGetAndTouch
+	opFlushAll
+	opVersion
 	opIncr
 	opDecr
 )
@@ -628,7 +816,26 @@ func writeRequest(bw *bufio.Writer, req request) error {
 		_, err := bw.WriteString("\r\n")
 		return err
 	case opSet:
-		if _, err := bw.WriteString("set "); err != nil {
+		fallthrough
+	case opAdd:
+		fallthrough
+	case opReplace:
+		fallthrough
+	case opAppend:
+		fallthrough
+	case opPrepend:
+		verb := "set "
+		switch req.op {
+		case opAdd:
+			verb = "add "
+		case opReplace:
+			verb = "replace "
+		case opAppend:
+			verb = "append "
+		case opPrepend:
+			verb = "prepend "
+		}
+		if _, err := bw.WriteString(verb); err != nil {
 			return err
 		}
 		if _, err := bw.WriteString(req.key); err != nil {
@@ -678,6 +885,27 @@ func writeRequest(bw *bufio.Writer, req request) error {
 		}
 		_, err := bw.WriteString("\r\n")
 		return err
+	case opGetAndTouch:
+		if _, err := bw.WriteString("gat "); err != nil {
+			return err
+		}
+		if err := writeUintDecimal(bw, req.ttl); err != nil {
+			return err
+		}
+		if _, err := bw.WriteString(" "); err != nil {
+			return err
+		}
+		if _, err := bw.WriteString(req.key); err != nil {
+			return err
+		}
+		_, err := bw.WriteString("\r\n")
+		return err
+	case opFlushAll:
+		_, err := bw.WriteString("flush_all\r\n")
+		return err
+	case opVersion:
+		_, err := bw.WriteString("version\r\n")
+		return err
 	case opIncr:
 		if _, err := bw.WriteString("incr "); err != nil {
 			return err
@@ -718,11 +946,25 @@ func readResponse(br *bufio.Reader, req request) ([]byte, error) {
 	case opGet:
 		return parseGetResponse(br)
 	case opSet:
+		fallthrough
+	case opAdd:
+		fallthrough
+	case opReplace:
+		fallthrough
+	case opAppend:
+		fallthrough
+	case opPrepend:
 		return nil, parseStoreResponse(br)
 	case opDelete:
 		return nil, parseDeleteResponse(br)
 	case opTouch:
 		return nil, parseTouchResponse(br)
+	case opGetAndTouch:
+		return parseGetResponse(br)
+	case opFlushAll:
+		return nil, parseOKResponse(br)
+	case opVersion:
+		return nil, parseVersionResponse(br)
 	case opIncr, opDecr:
 		return parseCounterResponse(br)
 	default:
@@ -829,6 +1071,40 @@ func parseTouchResponse(br *bufio.Reader) error {
 	default:
 		return fmt.Errorf("%w: unexpected touch response %q", errProtocol, line)
 	}
+}
+
+func parseOKResponse(br *bufio.Reader) error {
+	line, err := readLine(br)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(line, []byte("OK")) {
+		return nil
+	}
+	if bytes.Equal(line, []byte("ERROR")) {
+		return errProtocol
+	}
+	if bytes.HasPrefix(line, []byte("CLIENT_ERROR ")) || bytes.HasPrefix(line, []byte("SERVER_ERROR ")) {
+		return errors.New("memcache: " + string(line))
+	}
+	return fmt.Errorf("%w: unexpected response %q", errProtocol, line)
+}
+
+func parseVersionResponse(br *bufio.Reader) error {
+	line, err := readLine(br)
+	if err != nil {
+		return err
+	}
+	if bytes.HasPrefix(line, []byte("VERSION ")) {
+		return nil
+	}
+	if bytes.Equal(line, []byte("ERROR")) {
+		return errProtocol
+	}
+	if bytes.HasPrefix(line, []byte("CLIENT_ERROR ")) || bytes.HasPrefix(line, []byte("SERVER_ERROR ")) {
+		return errors.New("memcache: " + string(line))
+	}
+	return fmt.Errorf("%w: unexpected version response %q", errProtocol, line)
 }
 
 func parseCounterResponse(br *bufio.Reader) ([]byte, error) {

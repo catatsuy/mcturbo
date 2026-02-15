@@ -171,3 +171,47 @@ func TestIntegrationIncrDecr(t *testing.T) {
 		t.Fatalf("unexpected incr with context value: %d", n)
 	}
 }
+
+func TestIntegrationExtendedStoreCommands(t *testing.T) {
+	c := newIntegrationClient(t)
+	defer c.Close()
+
+	_ = c.Delete("int:add")
+	if err := c.Add("int:add", []byte("a"), 10); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := c.Add("int:add", []byte("b"), 10); !errors.Is(err, ErrNotStored) {
+		t.Fatalf("second add should be not stored: %v", err)
+	}
+	if err := c.Replace("int:add", []byte("r"), 10); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if err := c.Append("int:add", []byte("x")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := c.Prepend("int:add", []byte("y")); err != nil {
+		t.Fatalf("prepend: %v", err)
+	}
+	v, err := c.Get("int:add")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if string(v) != "yrx" {
+		t.Fatalf("unexpected merged value: %q", string(v))
+	}
+
+	if _, err := c.GetAndTouch("int:add", 10); err != nil {
+		t.Fatalf("get and touch: %v", err)
+	}
+
+	if err := c.Ping(); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+	if err := c.FlushAll(); err != nil {
+		t.Fatalf("flush all: %v", err)
+	}
+	_, err = c.Get("int:add")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected not found after flush_all: %v", err)
+	}
+}
