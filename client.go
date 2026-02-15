@@ -225,14 +225,14 @@ func (c *Client) Gets(key string) (*Item, error) {
 	return c.doGetFast(opGets, key, 0)
 }
 
-// GetMulti fetches multiple keys using the memcached text protocol.
+// GetMultiWithContext fetches multiple keys using the memcached text protocol.
 //
 // Note: This method may return both a non-empty result and a non-nil error
 // when the operation partially succeeds (e.g., some workers fail while others succeed).
 //
 // This method does not batch/split keys. If you need to limit request size,
 // split keys on the caller side and call GetMulti multiple times.
-func (c *Client) GetMulti(ctx context.Context, keys []string) (map[string]*Item, error) {
+func (c *Client) GetMultiWithContext(ctx context.Context, keys []string) (map[string]*Item, error) {
 	out := make(map[string]*Item, len(keys))
 	if len(keys) == 0 {
 		return out, nil
@@ -269,6 +269,62 @@ func (c *Client) GetMulti(ctx context.Context, keys []string) (map[string]*Item,
 		ks := append([]string(nil), groupedKeys...)
 		go func(w *workerConn, keys []string) {
 			items, err := w.getMultiWithContext(ctx, keys)
+			ch <- getMultiResult{addr: w.addr, items: items, err: err}
+		}(w, ks)
+	}
+
+	var merr *MultiError
+	for range byWorker {
+		r := <-ch
+		if r.err != nil {
+			if merr == nil {
+				merr = &MultiError{PerServer: map[string]error{}}
+			}
+			if _, exists := merr.PerServer[r.addr]; !exists {
+				merr.PerServer[r.addr] = r.err
+			}
+			continue
+		}
+		maps.Copy(out, r.items)
+	}
+	if merr != nil {
+		return out, merr
+	}
+	return out, nil
+}
+
+// GetMulti fetches multiple keys without context.
+func (c *Client) GetMulti(keys []string) (map[string]*Item, error) {
+	out := make(map[string]*Item, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	if c.closed.Load() {
+		return out, ErrClosed
+	}
+	for _, key := range keys {
+		if err := validateKey(key); err != nil {
+			return out, err
+		}
+	}
+
+	byWorker := make(map[int][]string, len(c.workers))
+	for _, key := range keys {
+		w := c.pickWorker(key)
+		byWorker[w.id] = append(byWorker[w.id], key)
+	}
+
+	type getMultiResult struct {
+		addr  string
+		items map[string]*Item
+		err   error
+	}
+	ch := make(chan getMultiResult, len(byWorker))
+	for wid, groupedKeys := range byWorker {
+		w := c.workers[wid]
+		ks := append([]string(nil), groupedKeys...)
+		go func(w *workerConn, keys []string) {
+			items, err := w.getMultiFast(keys)
 			ch <- getMultiResult{addr: w.addr, items: items, err: err}
 		}(w, ks)
 	}
@@ -993,6 +1049,40 @@ func (w *workerConn) getMultiWithContext(ctx context.Context, keys []string) (ma
 	items, err := parseGetMultiResponse(pc.br)
 	if err != nil {
 		return nil, normalizeContextErr(ctx, deadline, err)
+	}
+	keep = true
+	return items, nil
+}
+
+func (w *workerConn) getMultiFast(keys []string) (map[string]*Item, error) {
+	w.acquireSlot()
+	defer w.releaseSlot()
+
+	pc, err := w.acquireConnFast()
+	if err != nil {
+		return nil, err
+	}
+	keep := false
+	defer func() {
+		w.releaseConn(pc, keep)
+	}()
+
+	deadline := time.Time{}
+	if w.defaultDeadline > 0 {
+		deadline = time.Now().Add(w.defaultDeadline)
+	}
+	if err := pc.conn.SetDeadline(deadline); err != nil {
+		return nil, err
+	}
+	if err := writeGetMultiRequest(pc.bw, keys); err != nil {
+		return nil, err
+	}
+	if err := pc.bw.Flush(); err != nil {
+		return nil, err
+	}
+	items, err := parseGetMultiResponse(pc.br)
+	if err != nil {
+		return nil, err
 	}
 	keep = true
 	return items, nil

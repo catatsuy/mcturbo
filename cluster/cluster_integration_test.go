@@ -147,6 +147,27 @@ func TestIntegrationModulaSetGet(t *testing.T) {
 	if string(v.Value) != "ybx" {
 		t.Fatalf("unexpected merged value: %q", string(v.Value))
 	}
+
+	if err := c.SetNoContext("cluster:modula:m1", []byte("mv1"), 1, 5); err != nil {
+		t.Fatalf("set m1: %v", err)
+	}
+	if err := c.SetNoContext("cluster:modula:m2", []byte("mv2"), 2, 5); err != nil {
+		t.Fatalf("set m2: %v", err)
+	}
+	m, err := c.GetMulti([]string{"cluster:modula:m1", "cluster:modula:m2", "cluster:modula:missing"})
+	if err != nil {
+		t.Fatalf("getmulti no context: %v", err)
+	}
+	if len(m) != 2 {
+		t.Fatalf("unexpected getmulti result size: %d", len(m))
+	}
+	m, err = c.GetMultiWithContext(ctx, []string{"cluster:modula:m1", "cluster:modula:m2"})
+	if err != nil {
+		t.Fatalf("getmulti with context: %v", err)
+	}
+	if len(m) != 2 {
+		t.Fatalf("unexpected getmulti(ctx) result size: %d", len(m))
+	}
 }
 
 func TestIntegrationConsistentSetGet(t *testing.T) {

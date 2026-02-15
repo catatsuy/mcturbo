@@ -553,7 +553,7 @@ func TestGetMultiEmpty(t *testing.T) {
 	}
 	defer c.Close()
 
-	got, err := c.GetMulti(context.Background(), nil)
+	got, err := c.GetMultiWithContext(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("getmulti empty: %v", err)
 	}
@@ -607,7 +607,7 @@ func TestGetMultiBasicAndMiss(t *testing.T) {
 	}
 	defer c.Close()
 
-	got, err := c.GetMulti(context.Background(), []string{"k1", "k2", "k3"})
+	got, err := c.GetMultiWithContext(context.Background(), []string{"k1", "k2", "k3"})
 	if err != nil {
 		t.Fatalf("getmulti: %v", err)
 	}
@@ -619,6 +619,61 @@ func TestGetMultiBasicAndMiss(t *testing.T) {
 	}
 	if string(got["k1"].Value) != "v1" || string(got["k3"].Value) != "v3" {
 		t.Fatalf("unexpected values")
+	}
+}
+
+func TestGetMultiBasicAndMissNoContext(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		data = map[string][]byte{"k1": []byte("v1"), "k3": []byte("v3")}
+	)
+	server := newTestServer(t, func(conn net.Conn) {
+		br := bufio.NewReader(conn)
+		bw := bufio.NewWriter(conn)
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil {
+				return
+			}
+			line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+			parts := strings.Split(line, " ")
+			if len(parts) == 0 {
+				return
+			}
+			if parts[0] != "get" {
+				return
+			}
+			for i := 1; i < len(parts); i++ {
+				mu.Lock()
+				v, ok := data[parts[i]]
+				mu.Unlock()
+				if ok {
+					_, _ = bw.WriteString(fmt.Sprintf("VALUE %s 0 %d\r\n", parts[i], len(v)))
+					_, _ = bw.Write(v)
+					_, _ = bw.WriteString("\r\n")
+				}
+			}
+			_, _ = bw.WriteString("END\r\n")
+			_ = bw.Flush()
+		}
+	})
+	defer server.Close()
+
+	c, err := New(server.Addr(), WithWorkers(2))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer c.Close()
+
+	got, err := c.GetMulti([]string{"k1", "k2", "k3"})
+	if err != nil {
+		t.Fatalf("getmulti no context: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 hits, got %d", len(got))
+	}
+	if _, ok := got["k2"]; ok {
+		t.Fatalf("miss key should not be present")
 	}
 }
 
@@ -675,7 +730,7 @@ func TestGetMultiPartialFailure(t *testing.T) {
 		t.Fatalf("failed to prepare worker-separated keys")
 	}
 
-	got, err := c.GetMulti(context.Background(), []string{goodKey, badKey})
+	got, err := c.GetMultiWithContext(context.Background(), []string{goodKey, badKey})
 	if err == nil {
 		t.Fatalf("expected partial error")
 	}
@@ -719,7 +774,7 @@ func TestGetMultiAllFailure(t *testing.T) {
 	}
 	defer c.Close()
 
-	got, err := c.GetMulti(context.Background(), []string{"k1", "k2"})
+	got, err := c.GetMultiWithContext(context.Background(), []string{"k1", "k2"})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
