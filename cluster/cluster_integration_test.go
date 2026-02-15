@@ -280,3 +280,27 @@ func TestIntegrationUpdateServers(t *testing.T) {
 		t.Fatalf("get after update: %v", err)
 	}
 }
+
+func TestIntegrationCAS(t *testing.T) {
+	c := newIntegrationCluster(t, WithDistribution(DistributionModula))
+	defer c.Close()
+
+	key := "cluster:cas:key"
+	_ = c.DeleteNoContext(key)
+	if err := c.SetNoContext(key, []byte("v1"), 1, 10); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	it, err := c.GetsNoContext(key)
+	if err != nil {
+		t.Fatalf("gets: %v", err)
+	}
+	if it.CAS == 0 {
+		t.Fatalf("expected cas value")
+	}
+	if err := c.CASNoContext(key, []byte("v2"), 2, 10, it.CAS); err != nil {
+		t.Fatalf("cas: %v", err)
+	}
+	if err := c.CASNoContext(key, []byte("v3"), 2, 10, it.CAS); !errors.Is(err, mcturbo.ErrCASConflict) {
+		t.Fatalf("expected cas conflict, got %v", err)
+	}
+}

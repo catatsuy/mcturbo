@@ -9,7 +9,7 @@ It provides:
 ## Scope
 
 - Protocol: memcached ASCII only
-- Supported commands: `get`, `set`, `delete`, `touch`
+- Supported commands: `get`, `gets`, `set`, `add`, `replace`, `cas`, `append`, `prepend`, `delete`, `touch`, `gat`, `incr`, `decr`
 - Not in scope: binary protocol, SASL, compression, serializer
 
 ## Single-Server Client
@@ -18,9 +18,11 @@ It provides:
 
 Fast path (no context):
 - `Get(key string)`
+- `Gets(key string)`
 - `Set(key string, value []byte, flags uint32, ttlSeconds int)`
 - `Add(key string, value []byte, flags uint32, ttlSeconds int)`
 - `Replace(key string, value []byte, flags uint32, ttlSeconds int)`
+- `CAS(key string, value []byte, flags uint32, ttlSeconds int, cas uint64)`
 - `Append(key string, value []byte)`
 - `Prepend(key string, value []byte)`
 - `Delete(key string)`
@@ -33,10 +35,12 @@ Fast path (no context):
 
 Context-aware path:
 - `GetWithContext(ctx context.Context, key string)`
+- `GetsWithContext(ctx context.Context, key string)`
 - `GetMulti(ctx context.Context, keys []string)`
 - `SetWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
 - `AddWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
 - `ReplaceWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
+- `CASWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int, cas uint64)`
 - `AppendWithContext(ctx context.Context, key string, value []byte)`
 - `PrependWithContext(ctx context.Context, key string, value []byte)`
 - `DeleteWithContext(ctx context.Context, key string)`
@@ -91,7 +95,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("value=%s", string(v))
+	log.Printf("value=%s flags=%d", string(v.Value), v.Flags)
 }
 ```
 
@@ -135,7 +139,7 @@ Context-aware path:
 
 Fast path:
 - `Get`, `Set`, `Add`, `Replace`, `Append`, `Prepend`, `Delete`, `Touch`, `GetAndTouch`, `Incr`, `Decr`
-- Explicit aliases: `GetNoContext`, `SetNoContext`, `AddNoContext`, `ReplaceNoContext`, `AppendNoContext`, `PrependNoContext`, `DeleteNoContext`, `TouchNoContext`, `GetAndTouchNoContext`, `IncrNoContext`, `DecrNoContext`
+- Explicit aliases: `GetNoContext`, `GetsNoContext`, `SetNoContext`, `AddNoContext`, `ReplaceNoContext`, `CASNoContext`, `AppendNoContext`, `PrependNoContext`, `DeleteNoContext`, `TouchNoContext`, `GetAndTouchNoContext`, `IncrNoContext`, `DecrNoContext`
 
 Management:
 - `UpdateServers([]Server)`
@@ -183,7 +187,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("value=%s", string(v))
+	log.Printf("value=%s flags=%d", string(v.Value), v.Flags)
 }
 ```
 

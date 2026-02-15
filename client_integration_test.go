@@ -215,3 +215,40 @@ func TestIntegrationExtendedStoreCommands(t *testing.T) {
 		t.Fatalf("expected not found after flush_all: %v", err)
 	}
 }
+
+func TestIntegrationCAS(t *testing.T) {
+	c := newIntegrationClient(t)
+	defer c.Close()
+
+	key := "int:cas"
+	_ = c.Delete(key)
+	if err := c.Set(key, []byte("v1"), 7, 10); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	it, err := c.Gets(key)
+	if err != nil {
+		t.Fatalf("gets: %v", err)
+	}
+	if it.CAS == 0 {
+		t.Fatalf("expected non-zero CAS")
+	}
+	if it.Flags != 7 {
+		t.Fatalf("flags mismatch: %d", it.Flags)
+	}
+	if err := c.CAS(key, []byte("v2"), 9, 10, it.CAS); err != nil {
+		t.Fatalf("cas: %v", err)
+	}
+	if err := c.CAS(key, []byte("v3"), 9, 10, it.CAS); !errors.Is(err, ErrCASConflict) {
+		t.Fatalf("expected cas conflict, got %v", err)
+	}
+	got, err := c.Get(key)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if string(got.Value) != "v2" {
+		t.Fatalf("unexpected value: %q", string(got.Value))
+	}
+	if got.Flags != 9 {
+		t.Fatalf("unexpected flags: %d", got.Flags)
+	}
+}

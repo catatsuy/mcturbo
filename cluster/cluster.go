@@ -24,6 +24,7 @@ type Server struct {
 
 type shardClient interface {
 	Get(key string) (*mcturbo.Item, error)
+	Gets(key string) (*mcturbo.Item, error)
 	Set(key string, value []byte, flags uint32, ttlSeconds int) error
 	Add(key string, value []byte, flags uint32, ttlSeconds int) error
 	Replace(key string, value []byte, flags uint32, ttlSeconds int) error
@@ -34,7 +35,9 @@ type shardClient interface {
 	GetAndTouch(key string, ttlSeconds int) (*mcturbo.Item, error)
 	Incr(key string, delta uint64) (uint64, error)
 	Decr(key string, delta uint64) (uint64, error)
+	CAS(key string, value []byte, flags uint32, ttlSeconds int, cas uint64) error
 	GetWithContext(ctx context.Context, key string) (*mcturbo.Item, error)
+	GetsWithContext(ctx context.Context, key string) (*mcturbo.Item, error)
 	SetWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error
 	AddWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error
 	ReplaceWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error
@@ -45,6 +48,7 @@ type shardClient interface {
 	GetAndTouchWithContext(ctx context.Context, key string, ttlSeconds int) (*mcturbo.Item, error)
 	IncrWithContext(ctx context.Context, key string, delta uint64) (uint64, error)
 	DecrWithContext(ctx context.Context, key string, delta uint64) (uint64, error)
+	CASWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int, cas uint64) error
 	Close() error
 }
 
@@ -103,6 +107,15 @@ func (c *Cluster) Get(key string) (*mcturbo.Item, error) {
 		return nil, err
 	}
 	return shard.Get(key)
+}
+
+// Gets returns the item for key with CAS value.
+func (c *Cluster) Gets(key string) (*mcturbo.Item, error) {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return nil, err
+	}
+	return shard.Gets(key)
 }
 
 // Set stores value for key with flags and ttlSeconds.
@@ -195,6 +208,15 @@ func (c *Cluster) Decr(key string, delta uint64) (uint64, error) {
 	return shard.Decr(key, delta)
 }
 
+// CAS stores value for key only when cas matches.
+func (c *Cluster) CAS(key string, value []byte, flags uint32, ttlSeconds int, cas uint64) error {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return err
+	}
+	return shard.CAS(key, value, flags, ttlSeconds, cas)
+}
+
 // GetWithContext returns the value for key using ctx.
 func (c *Cluster) GetWithContext(ctx context.Context, key string) (*mcturbo.Item, error) {
 	shard, err := c.pickShard(key)
@@ -202,6 +224,15 @@ func (c *Cluster) GetWithContext(ctx context.Context, key string) (*mcturbo.Item
 		return nil, err
 	}
 	return shard.GetWithContext(ctx, key)
+}
+
+// GetsWithContext returns the item for key with CAS value using ctx.
+func (c *Cluster) GetsWithContext(ctx context.Context, key string) (*mcturbo.Item, error) {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return nil, err
+	}
+	return shard.GetsWithContext(ctx, key)
 }
 
 // SetWithContext stores value for key with flags and ttlSeconds using ctx.
@@ -294,9 +325,23 @@ func (c *Cluster) DecrWithContext(ctx context.Context, key string, delta uint64)
 	return shard.DecrWithContext(ctx, key, delta)
 }
 
+// CASWithContext stores value for key only when cas matches using ctx.
+func (c *Cluster) CASWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int, cas uint64) error {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return err
+	}
+	return shard.CASWithContext(ctx, key, value, flags, ttlSeconds, cas)
+}
+
 // GetNoContext is an explicit no-context alias of Get.
 func (c *Cluster) GetNoContext(key string) (*mcturbo.Item, error) {
 	return c.Get(key)
+}
+
+// GetsNoContext is an explicit no-context alias of Gets.
+func (c *Cluster) GetsNoContext(key string) (*mcturbo.Item, error) {
+	return c.Gets(key)
 }
 
 // SetNoContext is an explicit no-context alias of Set.
@@ -347,6 +392,11 @@ func (c *Cluster) IncrNoContext(key string, delta uint64) (uint64, error) {
 // DecrNoContext is an explicit no-context alias of Decr.
 func (c *Cluster) DecrNoContext(key string, delta uint64) (uint64, error) {
 	return c.Decr(key, delta)
+}
+
+// CASNoContext is an explicit no-context alias of CAS.
+func (c *Cluster) CASNoContext(key string, value []byte, flags uint32, ttlSeconds int, cas uint64) error {
+	return c.CAS(key, value, flags, ttlSeconds, cas)
 }
 
 // UpdateServers updates cluster servers and rebuilds routing.

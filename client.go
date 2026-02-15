@@ -23,6 +23,8 @@ var (
 	ErrNotStored = errors.New("memcache: not stored")
 	// ErrClosed is returned when the client is already closed.
 	ErrClosed = errors.New("memcache: client closed")
+	// ErrCASConflict is returned when CAS value does not match.
+	ErrCASConflict = errors.New("memcache: cas conflict")
 )
 
 var errProtocol = errors.New("memcache: protocol error")
@@ -31,6 +33,7 @@ var errProtocol = errors.New("memcache: protocol error")
 type Item struct {
 	Value []byte
 	Flags uint32
+	CAS   uint64
 }
 
 // MultiError represents partial failures during GetMulti.
@@ -214,6 +217,14 @@ func (c *Client) Get(key string) (*Item, error) {
 	return c.doGetFast(opGet, key, 0)
 }
 
+// Gets returns the item for key with CAS value.
+func (c *Client) Gets(key string) (*Item, error) {
+	if err := validateKey(key); err != nil {
+		return nil, err
+	}
+	return c.doGetFast(opGets, key, 0)
+}
+
 // GetMulti fetches multiple keys using the memcached text protocol.
 //
 // Note: This method may return both a non-empty result and a non-nil error
@@ -287,7 +298,7 @@ func (c *Client) Set(key string, value []byte, flags uint32, ttlSeconds int) err
 	if err := validateStoreInput(key, ttlSeconds); err != nil {
 		return err
 	}
-	_, err := c.doFast(opSet, key, value, flags, ttlSeconds, 0)
+	_, err := c.doFast(opSet, key, value, flags, ttlSeconds, 0, 0)
 	return err
 }
 
@@ -296,7 +307,7 @@ func (c *Client) Add(key string, value []byte, flags uint32, ttlSeconds int) err
 	if err := validateStoreInput(key, ttlSeconds); err != nil {
 		return err
 	}
-	_, err := c.doFast(opAdd, key, value, flags, ttlSeconds, 0)
+	_, err := c.doFast(opAdd, key, value, flags, ttlSeconds, 0, 0)
 	return err
 }
 
@@ -305,7 +316,16 @@ func (c *Client) Replace(key string, value []byte, flags uint32, ttlSeconds int)
 	if err := validateStoreInput(key, ttlSeconds); err != nil {
 		return err
 	}
-	_, err := c.doFast(opReplace, key, value, flags, ttlSeconds, 0)
+	_, err := c.doFast(opReplace, key, value, flags, ttlSeconds, 0, 0)
+	return err
+}
+
+// CAS stores value for key only when cas matches.
+func (c *Client) CAS(key string, value []byte, flags uint32, ttlSeconds int, cas uint64) error {
+	if err := validateStoreInput(key, ttlSeconds); err != nil {
+		return err
+	}
+	_, err := c.doFast(opCAS, key, value, flags, ttlSeconds, 0, cas)
 	return err
 }
 
@@ -314,7 +334,7 @@ func (c *Client) Append(key string, value []byte) error {
 	if err := validateKey(key); err != nil {
 		return err
 	}
-	_, err := c.doFast(opAppend, key, value, 0, 0, 0)
+	_, err := c.doFast(opAppend, key, value, 0, 0, 0, 0)
 	return err
 }
 
@@ -323,7 +343,7 @@ func (c *Client) Prepend(key string, value []byte) error {
 	if err := validateKey(key); err != nil {
 		return err
 	}
-	_, err := c.doFast(opPrepend, key, value, 0, 0, 0)
+	_, err := c.doFast(opPrepend, key, value, 0, 0, 0, 0)
 	return err
 }
 
@@ -332,7 +352,7 @@ func (c *Client) Delete(key string) error {
 	if err := validateKey(key); err != nil {
 		return err
 	}
-	_, err := c.doFast(opDelete, key, nil, 0, 0, 0)
+	_, err := c.doFast(opDelete, key, nil, 0, 0, 0, 0)
 	return err
 }
 
@@ -344,7 +364,7 @@ func (c *Client) Touch(key string, ttlSeconds int) error {
 	if ttlSeconds < 0 {
 		return errors.New("memcache: ttlSeconds must be >= 0")
 	}
-	_, err := c.doFast(opTouch, key, nil, 0, ttlSeconds, 0)
+	_, err := c.doFast(opTouch, key, nil, 0, ttlSeconds, 0, 0)
 	return err
 }
 
@@ -364,7 +384,7 @@ func (c *Client) Incr(key string, delta uint64) (uint64, error) {
 	if err := validateKey(key); err != nil {
 		return 0, err
 	}
-	v, err := c.doFast(opIncr, key, nil, 0, 0, delta)
+	v, err := c.doFast(opIncr, key, nil, 0, 0, delta, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -376,7 +396,7 @@ func (c *Client) Decr(key string, delta uint64) (uint64, error) {
 	if err := validateKey(key); err != nil {
 		return 0, err
 	}
-	v, err := c.doFast(opDecr, key, nil, 0, 0, delta)
+	v, err := c.doFast(opDecr, key, nil, 0, 0, delta, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -406,6 +426,17 @@ func (c *Client) GetWithContext(ctx context.Context, key string) (*Item, error) 
 	return c.doGetWithContext(ctx, opGet, key, 0)
 }
 
+// GetsWithContext returns the item for key with CAS value using ctx.
+func (c *Client) GetsWithContext(ctx context.Context, key string) (*Item, error) {
+	if err := validateKey(key); err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		return nil, errors.New("memcache: nil context")
+	}
+	return c.doGetWithContext(ctx, opGets, key, 0)
+}
+
 // SetWithContext stores value for key with flags and ttlSeconds using ctx.
 func (c *Client) SetWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error {
 	if err := validateStoreInput(key, ttlSeconds); err != nil {
@@ -414,7 +445,7 @@ func (c *Client) SetWithContext(ctx context.Context, key string, value []byte, f
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opSet, key, value, flags, ttlSeconds, 0)
+	_, err := c.doWithContext(ctx, opSet, key, value, flags, ttlSeconds, 0, 0)
 	return err
 }
 
@@ -426,7 +457,7 @@ func (c *Client) AddWithContext(ctx context.Context, key string, value []byte, f
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opAdd, key, value, flags, ttlSeconds, 0)
+	_, err := c.doWithContext(ctx, opAdd, key, value, flags, ttlSeconds, 0, 0)
 	return err
 }
 
@@ -438,7 +469,19 @@ func (c *Client) ReplaceWithContext(ctx context.Context, key string, value []byt
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opReplace, key, value, flags, ttlSeconds, 0)
+	_, err := c.doWithContext(ctx, opReplace, key, value, flags, ttlSeconds, 0, 0)
+	return err
+}
+
+// CASWithContext stores value for key only when cas matches using ctx.
+func (c *Client) CASWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int, cas uint64) error {
+	if err := validateStoreInput(key, ttlSeconds); err != nil {
+		return err
+	}
+	if ctx == nil {
+		return errors.New("memcache: nil context")
+	}
+	_, err := c.doWithContext(ctx, opCAS, key, value, flags, ttlSeconds, 0, cas)
 	return err
 }
 
@@ -450,7 +493,7 @@ func (c *Client) AppendWithContext(ctx context.Context, key string, value []byte
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opAppend, key, value, 0, 0, 0)
+	_, err := c.doWithContext(ctx, opAppend, key, value, 0, 0, 0, 0)
 	return err
 }
 
@@ -462,7 +505,7 @@ func (c *Client) PrependWithContext(ctx context.Context, key string, value []byt
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opPrepend, key, value, 0, 0, 0)
+	_, err := c.doWithContext(ctx, opPrepend, key, value, 0, 0, 0, 0)
 	return err
 }
 
@@ -474,7 +517,7 @@ func (c *Client) DeleteWithContext(ctx context.Context, key string) error {
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opDelete, key, nil, 0, 0, 0)
+	_, err := c.doWithContext(ctx, opDelete, key, nil, 0, 0, 0, 0)
 	return err
 }
 
@@ -489,7 +532,7 @@ func (c *Client) TouchWithContext(ctx context.Context, key string, ttlSeconds in
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opTouch, key, nil, 0, ttlSeconds, 0)
+	_, err := c.doWithContext(ctx, opTouch, key, nil, 0, ttlSeconds, 0, 0)
 	return err
 }
 
@@ -515,7 +558,7 @@ func (c *Client) IncrWithContext(ctx context.Context, key string, delta uint64) 
 	if ctx == nil {
 		return 0, errors.New("memcache: nil context")
 	}
-	v, err := c.doWithContext(ctx, opIncr, key, nil, 0, 0, delta)
+	v, err := c.doWithContext(ctx, opIncr, key, nil, 0, 0, delta, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -530,7 +573,7 @@ func (c *Client) DecrWithContext(ctx context.Context, key string, delta uint64) 
 	if ctx == nil {
 		return 0, errors.New("memcache: nil context")
 	}
-	v, err := c.doWithContext(ctx, opDecr, key, nil, 0, 0, delta)
+	v, err := c.doWithContext(ctx, opDecr, key, nil, 0, 0, delta, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -567,12 +610,12 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func (c *Client) doFast(op opType, key string, value []byte, flags uint32, ttl int, delta uint64) ([]byte, error) {
+func (c *Client) doFast(op opType, key string, value []byte, flags uint32, ttl int, delta uint64, cas uint64) ([]byte, error) {
 	if c.closed.Load() {
 		return nil, ErrClosed
 	}
 	w := c.pickWorker(key)
-	return w.roundTripFast(request{op: op, key: key, value: value, flags: flags, ttl: ttl, delta: delta})
+	return w.roundTripFast(request{op: op, key: key, value: value, flags: flags, ttl: ttl, delta: delta, cas: cas})
 }
 
 func (c *Client) doGetFast(op opType, key string, ttl int) (*Item, error) {
@@ -597,7 +640,7 @@ func (c *Client) doFastNoKey(op opType) ([]byte, error) {
 	return c.workers[0].roundTripFast(request{op: op})
 }
 
-func (c *Client) doWithContext(ctx context.Context, op opType, key string, value []byte, flags uint32, ttl int, delta uint64) ([]byte, error) {
+func (c *Client) doWithContext(ctx context.Context, op opType, key string, value []byte, flags uint32, ttl int, delta uint64, cas uint64) ([]byte, error) {
 	if c.closed.Load() {
 		return nil, ErrClosed
 	}
@@ -605,7 +648,7 @@ func (c *Client) doWithContext(ctx context.Context, op opType, key string, value
 		return nil, err
 	}
 	w := c.pickWorker(key)
-	v, err := w.roundTripWithContext(ctx, request{op: op, key: key, value: value, flags: flags, ttl: ttl, delta: delta})
+	v, err := w.roundTripWithContext(ctx, request{op: op, key: key, value: value, flags: flags, ttl: ttl, delta: delta, cas: cas})
 	if err != nil {
 		return nil, err
 	}
@@ -672,9 +715,11 @@ type opType uint8
 
 const (
 	opGet opType = iota + 1
+	opGets
 	opSet
 	opAdd
 	opReplace
+	opCAS
 	opAppend
 	opPrepend
 	opDelete
@@ -693,6 +738,7 @@ type request struct {
 	flags uint32
 	ttl   int
 	delta uint64
+	cas   uint64
 }
 
 type workerConn struct {
@@ -1076,11 +1122,22 @@ func writeRequest(bw *bufio.Writer, req request) error {
 		}
 		_, err := bw.WriteString("\r\n")
 		return err
+	case opGets:
+		if _, err := bw.WriteString("gets "); err != nil {
+			return err
+		}
+		if _, err := bw.WriteString(req.key); err != nil {
+			return err
+		}
+		_, err := bw.WriteString("\r\n")
+		return err
 	case opSet:
 		fallthrough
 	case opAdd:
 		fallthrough
 	case opReplace:
+		fallthrough
+	case opCAS:
 		fallthrough
 	case opAppend:
 		fallthrough
@@ -1091,6 +1148,8 @@ func writeRequest(bw *bufio.Writer, req request) error {
 			verb = "add "
 		case opReplace:
 			verb = "replace "
+		case opCAS:
+			verb = "cas "
 		case opAppend:
 			verb = "append "
 		case opPrepend:
@@ -1119,6 +1178,14 @@ func writeRequest(bw *bufio.Writer, req request) error {
 		}
 		if err := writeUintDecimal(bw, len(req.value)); err != nil {
 			return err
+		}
+		if req.op == opCAS {
+			if _, err := bw.WriteString(" "); err != nil {
+				return err
+			}
+			if err := writeUint64Decimal(bw, req.cas); err != nil {
+				return err
+			}
 		}
 		if _, err := bw.WriteString("\r\n"); err != nil {
 			return err
@@ -1230,15 +1297,26 @@ func readResponse(br *bufio.Reader, req request) ([]byte, error) {
 	switch req.op {
 	case opGet:
 		return parseGetResponse(br)
+	case opGets:
+		item, err := parseGetItemResponse(br)
+		if err != nil {
+			return nil, err
+		}
+		return item.Value, nil
 	case opSet:
 		fallthrough
 	case opAdd:
 		fallthrough
 	case opReplace:
 		fallthrough
+	case opCAS:
+		fallthrough
 	case opAppend:
 		fallthrough
 	case opPrepend:
+		if req.op == opCAS {
+			return nil, parseCASResponse(br)
+		}
 		return nil, parseStoreResponse(br)
 	case opDelete:
 		return nil, parseDeleteResponse(br)
@@ -1279,7 +1357,7 @@ func parseGetItemResponse(br *bufio.Reader) (*Item, error) {
 	if bytes.HasPrefix(line, []byte("CLIENT_ERROR ")) || bytes.HasPrefix(line, []byte("SERVER_ERROR ")) {
 		return nil, errors.New("memcache: " + string(line))
 	}
-	flags, n, err := parseValueMeta(line)
+	flags, n, cas, err := parseValueMeta(line)
 	if err != nil {
 		return nil, err
 	}
@@ -1305,6 +1383,7 @@ func parseGetItemResponse(br *bufio.Reader) (*Item, error) {
 	return &Item{
 		Value: buf,
 		Flags: flags,
+		CAS:   cas,
 	}, nil
 }
 
@@ -1324,6 +1403,27 @@ func parseStoreResponse(br *bufio.Reader) error {
 		return errors.New("memcache: " + string(line))
 	default:
 		return fmt.Errorf("%w: unexpected set response %q", errProtocol, line)
+	}
+}
+
+func parseCASResponse(br *bufio.Reader) error {
+	line, err := readLine(br)
+	if err != nil {
+		return err
+	}
+	switch {
+	case bytes.Equal(line, []byte("STORED")):
+		return nil
+	case bytes.Equal(line, []byte("EXISTS")):
+		return ErrCASConflict
+	case bytes.Equal(line, []byte("NOT_FOUND")):
+		return ErrNotFound
+	case bytes.Equal(line, []byte("ERROR")):
+		return errProtocol
+	case bytes.HasPrefix(line, []byte("CLIENT_ERROR ")) || bytes.HasPrefix(line, []byte("SERVER_ERROR ")):
+		return errors.New("memcache: " + string(line))
+	default:
+		return fmt.Errorf("%w: unexpected cas response %q", errProtocol, line)
 	}
 }
 
@@ -1459,7 +1559,7 @@ func parseGetMultiResponse(br *bufio.Reader) (map[string]*Item, error) {
 
 func readGetItemResponse(br *bufio.Reader, req request) (*Item, error) {
 	switch req.op {
-	case opGet, opGetAndTouch:
+	case opGet, opGets, opGetAndTouch:
 		return parseGetItemResponse(br)
 	default:
 		return nil, errProtocol
@@ -1507,23 +1607,23 @@ func parseValueBytes(line []byte) (int, error) {
 	return n, nil
 }
 
-func parseValueMeta(line []byte) (uint32, int, error) {
-	_, flags, n, err := parseValueHeaderParts(line)
-	return flags, n, err
+func parseValueMeta(line []byte) (uint32, int, uint64, error) {
+	_, flags, n, cas, err := parseValueHeaderParts(line)
+	return flags, n, cas, err
 }
 
 func parseValueHeader(line []byte) (string, uint32, int, error) {
-	key, flags, n, err := parseValueHeaderParts(line)
+	key, flags, n, _, err := parseValueHeaderParts(line)
 	if err != nil {
 		return "", 0, 0, err
 	}
 	return string(key), flags, n, nil
 }
 
-func parseValueHeaderParts(line []byte) ([]byte, uint32, int, error) {
+func parseValueHeaderParts(line []byte) ([]byte, uint32, int, uint64, error) {
 	// VALUE <key> <flags> <bytes> [cas]
 	if len(line) < 8 || !bytes.HasPrefix(line, []byte("VALUE ")) {
-		return nil, 0, 0, fmt.Errorf("%w: unexpected get response %q", errProtocol, line)
+		return nil, 0, 0, 0, fmt.Errorf("%w: unexpected get response %q", errProtocol, line)
 	}
 
 	i := len("VALUE ")
@@ -1532,7 +1632,7 @@ func parseValueHeaderParts(line []byte) ([]byte, uint32, int, error) {
 		i++
 	}
 	if i == len(line) || i == keyStart {
-		return nil, 0, 0, errProtocol
+		return nil, 0, 0, 0, errProtocol
 	}
 	key := line[keyStart:i]
 
@@ -1542,11 +1642,11 @@ func parseValueHeaderParts(line []byte) ([]byte, uint32, int, error) {
 		i++
 	}
 	if i == len(line) || i == flagsStart {
-		return nil, 0, 0, errProtocol
+		return nil, 0, 0, 0, errProtocol
 	}
 	flags, err := parseUint32(line[flagsStart:i])
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, 0, err
 	}
 
 	i++ // skip space
@@ -1555,13 +1655,20 @@ func parseValueHeaderParts(line []byte) ([]byte, uint32, int, error) {
 		i++
 	}
 	if bytesStart == i {
-		return nil, 0, 0, errProtocol
+		return nil, 0, 0, 0, errProtocol
 	}
 	n, ok := parsePositiveInt(line[bytesStart:i])
 	if !ok {
-		return nil, 0, 0, errProtocol
+		return nil, 0, 0, 0, errProtocol
 	}
-	return key, flags, n, nil
+	if i == len(line) {
+		return key, flags, n, 0, nil
+	}
+	cas, ok := parseUint64(line[i+1:])
+	if !ok {
+		return nil, 0, 0, 0, errProtocol
+	}
+	return key, flags, n, cas, nil
 }
 
 func writeUintDecimal(bw *bufio.Writer, n int) error {
