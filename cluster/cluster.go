@@ -27,10 +27,14 @@ type shardClient interface {
 	Set(key string, value []byte, ttlSeconds int) error
 	Delete(key string) error
 	Touch(key string, ttlSeconds int) error
+	Incr(key string, delta uint64) (uint64, error)
+	Decr(key string, delta uint64) (uint64, error)
 	GetWithContext(ctx context.Context, key string) ([]byte, error)
 	SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error
 	DeleteWithContext(ctx context.Context, key string) error
 	TouchWithContext(ctx context.Context, key string, ttlSeconds int) error
+	IncrWithContext(ctx context.Context, key string, delta uint64) (uint64, error)
+	DecrWithContext(ctx context.Context, key string, delta uint64) (uint64, error)
 	Close() error
 }
 
@@ -118,6 +122,24 @@ func (c *Cluster) Touch(key string, ttlSeconds int) error {
 	return shard.Touch(key, ttlSeconds)
 }
 
+// Incr increments a numeric value by delta and returns the new value.
+func (c *Cluster) Incr(key string, delta uint64) (uint64, error) {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return 0, err
+	}
+	return shard.Incr(key, delta)
+}
+
+// Decr decrements a numeric value by delta and returns the new value.
+func (c *Cluster) Decr(key string, delta uint64) (uint64, error) {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return 0, err
+	}
+	return shard.Decr(key, delta)
+}
+
 // GetWithContext returns the value for key using ctx.
 func (c *Cluster) GetWithContext(ctx context.Context, key string) ([]byte, error) {
 	shard, err := c.pickShard(key)
@@ -154,6 +176,24 @@ func (c *Cluster) TouchWithContext(ctx context.Context, key string, ttlSeconds i
 	return shard.TouchWithContext(ctx, key, ttlSeconds)
 }
 
+// IncrWithContext increments a numeric value by delta and returns the new value.
+func (c *Cluster) IncrWithContext(ctx context.Context, key string, delta uint64) (uint64, error) {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return 0, err
+	}
+	return shard.IncrWithContext(ctx, key, delta)
+}
+
+// DecrWithContext decrements a numeric value by delta and returns the new value.
+func (c *Cluster) DecrWithContext(ctx context.Context, key string, delta uint64) (uint64, error) {
+	shard, err := c.pickShard(key)
+	if err != nil {
+		return 0, err
+	}
+	return shard.DecrWithContext(ctx, key, delta)
+}
+
 // GetNoContext is an explicit no-context alias of Get.
 func (c *Cluster) GetNoContext(key string) ([]byte, error) {
 	return c.Get(key)
@@ -172,6 +212,16 @@ func (c *Cluster) DeleteNoContext(key string) error {
 // TouchNoContext is an explicit no-context alias of Touch.
 func (c *Cluster) TouchNoContext(key string, ttlSeconds int) error {
 	return c.Touch(key, ttlSeconds)
+}
+
+// IncrNoContext is an explicit no-context alias of Incr.
+func (c *Cluster) IncrNoContext(key string, delta uint64) (uint64, error) {
+	return c.Incr(key, delta)
+}
+
+// DecrNoContext is an explicit no-context alias of Decr.
+func (c *Cluster) DecrNoContext(key string, delta uint64) (uint64, error) {
+	return c.Decr(key, delta)
 }
 
 // UpdateServers updates cluster servers and rebuilds routing.
