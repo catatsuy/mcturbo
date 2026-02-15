@@ -38,6 +38,10 @@ type fakeShard struct {
 	decrWithContextCount     int
 	casCount                 int
 	casWithContextCount      int
+	flushAllCount            int
+	pingCount                int
+	flushAllWithContextCount int
+	pingWithContextCount     int
 
 	getErr    error
 	setErr    error
@@ -390,6 +394,50 @@ func (s *fakeShard) CASWithContext(ctx context.Context, key string, value []byte
 	return nil
 }
 
+func (s *fakeShard) FlushAll() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flushAllCount++
+	s.last = "FlushAll"
+	if s.setErr != nil {
+		return s.setErr
+	}
+	return nil
+}
+
+func (s *fakeShard) Ping() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pingCount++
+	s.last = "Ping"
+	if s.setErr != nil {
+		return s.setErr
+	}
+	return nil
+}
+
+func (s *fakeShard) FlushAllWithContext(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flushAllWithContextCount++
+	s.last = "FlushAllWithContext"
+	if s.ctxErr != nil {
+		return s.ctxErr
+	}
+	return nil
+}
+
+func (s *fakeShard) PingWithContext(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pingWithContextCount++
+	s.last = "PingWithContext"
+	if s.ctxErr != nil {
+		return s.ctxErr
+	}
+	return nil
+}
+
 func (s *fakeShard) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -533,6 +581,25 @@ func TestClusterRoutingAndDelegation(t *testing.T) {
 	}
 	if target.addCount != 1 || target.replaceWithContextCount != 1 || target.appendCount != 1 || target.prependWithContextCount != 1 || target.casCount != 1 {
 		t.Fatalf("expected add/replace/append/prepend delegation on target")
+	}
+
+	if err := c.PingNoContext(); err != nil {
+		t.Fatalf("PingNoContext: %v", err)
+	}
+	if err := c.PingWithContext(ctx); err != nil {
+		t.Fatalf("PingWithContext: %v", err)
+	}
+	if err := c.FlushAllNoContext(); err != nil {
+		t.Fatalf("FlushAllNoContext: %v", err)
+	}
+	if err := c.FlushAllWithContext(ctx); err != nil {
+		t.Fatalf("FlushAllWithContext: %v", err)
+	}
+	if target.pingCount != 1 || other.pingCount != 1 || target.pingWithContextCount != 1 || other.pingWithContextCount != 1 {
+		t.Fatalf("expected ping to hit all shards once")
+	}
+	if target.flushAllCount != 1 || other.flushAllCount != 1 || target.flushAllWithContextCount != 1 || other.flushAllWithContextCount != 1 {
+		t.Fatalf("expected flush_all to hit all shards once")
 	}
 }
 
