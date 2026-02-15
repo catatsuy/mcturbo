@@ -4,6 +4,7 @@ import (
 	"errors"
 	"hash/crc32"
 	"hash/fnv"
+	"time"
 
 	"github.com/catatsuy/mcturbo"
 )
@@ -41,6 +42,9 @@ type clusterConfig struct {
 	distribution        Distribution
 	hash                Hash
 	libketamaCompatible bool
+	removeFailedServers bool
+	serverFailureLimit  int
+	retryTimeout        time.Duration
 	factory             shardFactory
 }
 
@@ -49,6 +53,9 @@ func defaultClusterConfig() clusterConfig {
 		vnodeFactor:  defaultVnodeFactor,
 		distribution: DistributionModula,
 		hash:         HashDefault,
+		// libmemcached-like defaults for auto-eject behavior.
+		serverFailureLimit: 2,
+		retryTimeout:       2 * time.Second,
 		factory: func(addr string, opts ...mcturbo.Option) (shardClient, error) {
 			return mcturbo.New(addr, opts...)
 		},
@@ -105,6 +112,36 @@ func WithHash(h Hash) ClusterOption {
 func WithLibketamaCompatible(enabled bool) ClusterOption {
 	return func(c *clusterConfig) error {
 		c.libketamaCompatible = enabled
+		return nil
+	}
+}
+
+// WithRemoveFailedServers enables temporary auto-eject on communication failures.
+func WithRemoveFailedServers(enabled bool) ClusterOption {
+	return func(c *clusterConfig) error {
+		c.removeFailedServers = enabled
+		return nil
+	}
+}
+
+// WithServerFailureLimit sets failures before a server is temporarily ejected.
+func WithServerFailureLimit(n int) ClusterOption {
+	return func(c *clusterConfig) error {
+		if n <= 0 {
+			return errors.New("cluster: server failure limit must be > 0")
+		}
+		c.serverFailureLimit = n
+		return nil
+	}
+}
+
+// WithRetryTimeout sets how long an ejected server stays out of the ring.
+func WithRetryTimeout(d time.Duration) ClusterOption {
+	return func(c *clusterConfig) error {
+		if d <= 0 {
+			return errors.New("cluster: retry timeout must be > 0")
+		}
+		c.retryTimeout = d
 		return nil
 	}
 }

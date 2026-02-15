@@ -29,6 +29,11 @@ var (
 
 var errProtocol = errors.New("memcache: protocol error")
 
+// IsProtocolError reports whether err is a protocol-level parsing/format error.
+func IsProtocolError(err error) bool {
+	return errors.Is(err, errProtocol)
+}
+
 // Item represents a value returned by get operations.
 type Item struct {
 	Value []byte

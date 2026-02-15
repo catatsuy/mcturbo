@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/catatsuy/mcturbo"
 )
@@ -527,6 +529,125 @@ func TestClusterNoFailoverOnShardError(t *testing.T) {
 	}
 	if target.getCount != 1 || other.getCount != 0 {
 		t.Fatalf("must not failover to other shard: target=%d other=%d", target.getCount, other.getCount)
+	}
+}
+
+func TestClusterAllDeadFallsBackToAllServers(t *testing.T) {
+	fakeByAddr := map[string]*fakeShard{}
+	factory := func(addr string, opts ...mcturbo.Option) (shardClient, error) {
+		s := &fakeShard{value: []byte("x"), getErr: io.EOF}
+		fakeByAddr[addr] = s
+		return s, nil
+	}
+	servers := []Server{{Addr: "127.0.0.1:22001", Weight: 1}, {Addr: "127.0.0.1:22002", Weight: 1}}
+	c, err := NewCluster(
+		servers,
+		withTestFactory(factory),
+		WithRemoveFailedServers(true),
+		WithServerFailureLimit(1),
+		WithRetryTimeout(time.Second),
+	)
+	if err != nil {
+		t.Fatalf("new cluster: %v", err)
+	}
+	defer c.Close()
+
+	key := "all-dead-fallback"
+	_, _ = c.GetNoContext(key)
+	_, _ = c.GetNoContext(key)
+
+	total := 0
+	for _, s := range fakeByAddr {
+		total += s.getCount
+	}
+	if total < 4 {
+		t.Fatalf("expected requests to hit all servers after all-dead fallback, total calls=%d", total)
+	}
+}
+
+func TestClusterFailoverOnCommunicationError(t *testing.T) {
+	fakeByAddr := map[string]*fakeShard{}
+	factory := func(addr string, opts ...mcturbo.Option) (shardClient, error) {
+		s := &fakeShard{value: []byte("ok-" + addr)}
+		fakeByAddr[addr] = s
+		return s, nil
+	}
+	servers := []Server{{Addr: "127.0.0.1:23001", Weight: 1}, {Addr: "127.0.0.1:23002", Weight: 1}}
+	c, err := NewCluster(
+		servers,
+		withTestFactory(factory),
+		WithRemoveFailedServers(true),
+		WithServerFailureLimit(1),
+		WithRetryTimeout(20*time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("new cluster: %v", err)
+	}
+	defer c.Close()
+
+	key := "failover-comm"
+	st := c.loadState()
+	idx := st.router.Pick(key)
+	target := fakeByAddr[servers[idx].Addr]
+	other := fakeByAddr[servers[(idx+1)%len(servers)].Addr]
+	target.getErr = io.EOF
+
+	it, err := c.GetNoContext(key)
+	if err != nil {
+		t.Fatalf("expected failover success, got %v", err)
+	}
+	if it == nil || string(it.Value) != "ok-"+servers[(idx+1)%len(servers)].Addr {
+		t.Fatalf("unexpected failover value: %#v", it)
+	}
+	if target.getCount != 1 || other.getCount != 1 {
+		t.Fatalf("expected one try on target and one on other: target=%d other=%d", target.getCount, other.getCount)
+	}
+
+	_, _ = c.GetNoContext(key)
+	if target.getCount != 1 {
+		t.Fatalf("expected dead target to be skipped before retry timeout")
+	}
+
+	time.Sleep(30 * time.Millisecond)
+	_, _ = c.GetNoContext(key)
+	if target.getCount < 2 {
+		t.Fatalf("expected target to be retried after retry timeout")
+	}
+}
+
+func TestClusterNoFailoverOnSemanticErrorEvenIfEnabled(t *testing.T) {
+	fakeByAddr := map[string]*fakeShard{}
+	factory := func(addr string, opts ...mcturbo.Option) (shardClient, error) {
+		s := &fakeShard{value: []byte("ok")}
+		fakeByAddr[addr] = s
+		return s, nil
+	}
+	servers := []Server{{Addr: "127.0.0.1:23101", Weight: 1}, {Addr: "127.0.0.1:23102", Weight: 1}}
+	c, err := NewCluster(
+		servers,
+		withTestFactory(factory),
+		WithRemoveFailedServers(true),
+		WithServerFailureLimit(1),
+		WithRetryTimeout(20*time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("new cluster: %v", err)
+	}
+	defer c.Close()
+
+	key := "no-failover-semantic"
+	st := c.loadState()
+	idx := st.router.Pick(key)
+	target := fakeByAddr[servers[idx].Addr]
+	other := fakeByAddr[servers[(idx+1)%len(servers)].Addr]
+	target.getErr = mcturbo.ErrNotFound
+
+	_, err = c.GetNoContext(key)
+	if !errors.Is(err, mcturbo.ErrNotFound) {
+		t.Fatalf("expected not found, got %v", err)
+	}
+	if target.getCount != 1 || other.getCount != 0 {
+		t.Fatalf("must not failover on semantic error: target=%d other=%d", target.getCount, other.getCount)
 	}
 }
 
