@@ -28,6 +28,8 @@ type Server struct {
 type shardClient interface {
 	Get(key string) (*mcturbo.Item, error)
 	Gets(key string) (*mcturbo.Item, error)
+	GetMulti(keys []string) (map[string]*mcturbo.Item, error)
+	GetMultiWithContext(ctx context.Context, keys []string) (map[string]*mcturbo.Item, error)
 	Set(key string, value []byte, flags uint32, ttlSeconds int) error
 	Add(key string, value []byte, flags uint32, ttlSeconds int) error
 	Replace(key string, value []byte, flags uint32, ttlSeconds int) error
@@ -128,6 +130,68 @@ func (c *Cluster) Gets(key string) (*mcturbo.Item, error) {
 	return c.execItemNoContext(key, func(shard shardClient) (*mcturbo.Item, error) {
 		return shard.Gets(key)
 	})
+}
+
+// GetMultiWithContext fetches multiple keys from routed shards using ctx.
+func (c *Cluster) GetMultiWithContext(ctx context.Context, keys []string) (map[string]*mcturbo.Item, error) {
+	out := make(map[string]*mcturbo.Item, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	if ctx == nil {
+		return out, errors.New("cluster: nil context")
+	}
+	if c.closed.Load() {
+		return out, ErrClosed
+	}
+	st := c.loadState()
+	if st == nil || st.router == nil || len(st.shards) == 0 {
+		return out, errNoServers
+	}
+
+	byShard := make(map[int][]string, len(st.shards))
+	for _, key := range keys {
+		idx := st.router.Pick(key)
+		if idx < 0 || idx >= len(st.shards) {
+			return out, errNoServers
+		}
+		byShard[idx] = append(byShard[idx], key)
+	}
+
+	type multiRes struct {
+		addr  string
+		items map[string]*mcturbo.Item
+		err   error
+	}
+	ch := make(chan multiRes, len(byShard))
+	for idx, grouped := range byShard {
+		shard := st.shards[idx]
+		addr := st.servers[idx].Addr
+		ks := append([]string(nil), grouped...)
+		go func() {
+			items, err := shard.GetMultiWithContext(ctx, ks)
+			ch <- multiRes{addr: addr, items: items, err: err}
+		}()
+	}
+
+	var merr *mcturbo.MultiError
+	for range byShard {
+		r := <-ch
+		if r.err != nil {
+			if merr == nil {
+				merr = &mcturbo.MultiError{PerServer: map[string]error{}}
+			}
+			merr.PerServer[r.addr] = r.err
+			continue
+		}
+		for k, v := range r.items {
+			out[k] = v
+		}
+	}
+	if merr != nil {
+		return out, merr
+	}
+	return out, nil
 }
 
 // Set stores value for key with flags and ttlSeconds.
@@ -306,6 +370,65 @@ func (c *Cluster) GetNoContext(key string) (*mcturbo.Item, error) {
 // GetsNoContext is an explicit no-context alias of Gets.
 func (c *Cluster) GetsNoContext(key string) (*mcturbo.Item, error) {
 	return c.Gets(key)
+}
+
+// GetMulti fetches multiple keys from routed shards without context.
+func (c *Cluster) GetMulti(keys []string) (map[string]*mcturbo.Item, error) {
+	out := make(map[string]*mcturbo.Item, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	if c.closed.Load() {
+		return out, ErrClosed
+	}
+	st := c.loadState()
+	if st == nil || st.router == nil || len(st.shards) == 0 {
+		return out, errNoServers
+	}
+
+	byShard := make(map[int][]string, len(st.shards))
+	for _, key := range keys {
+		idx := st.router.Pick(key)
+		if idx < 0 || idx >= len(st.shards) {
+			return out, errNoServers
+		}
+		byShard[idx] = append(byShard[idx], key)
+	}
+
+	type multiRes struct {
+		addr  string
+		items map[string]*mcturbo.Item
+		err   error
+	}
+	ch := make(chan multiRes, len(byShard))
+	for idx, grouped := range byShard {
+		shard := st.shards[idx]
+		addr := st.servers[idx].Addr
+		ks := append([]string(nil), grouped...)
+		go func() {
+			items, err := shard.GetMulti(ks)
+			ch <- multiRes{addr: addr, items: items, err: err}
+		}()
+	}
+
+	var merr *mcturbo.MultiError
+	for range byShard {
+		r := <-ch
+		if r.err != nil {
+			if merr == nil {
+				merr = &mcturbo.MultiError{PerServer: map[string]error{}}
+			}
+			merr.PerServer[r.addr] = r.err
+			continue
+		}
+		for k, v := range r.items {
+			out[k] = v
+		}
+	}
+	if merr != nil {
+		return out, merr
+	}
+	return out, nil
 }
 
 // SetNoContext is an explicit no-context alias of Set.

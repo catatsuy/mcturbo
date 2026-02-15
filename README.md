@@ -19,6 +19,7 @@ It provides:
 Fast path (no context):
 - `Get(key string)`
 - `Gets(key string)`
+- `GetMulti(keys []string)`
 - `Set(key string, value []byte, flags uint32, ttlSeconds int)`
 - `Add(key string, value []byte, flags uint32, ttlSeconds int)`
 - `Replace(key string, value []byte, flags uint32, ttlSeconds int)`
@@ -36,7 +37,7 @@ Fast path (no context):
 Context-aware path:
 - `GetWithContext(ctx context.Context, key string)`
 - `GetsWithContext(ctx context.Context, key string)`
-- `GetMulti(ctx context.Context, keys []string)`
+- `GetMultiWithContext(ctx context.Context, keys []string)`
 - `SetWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
 - `AddWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
 - `ReplaceWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
@@ -130,15 +131,18 @@ func main() {
 - `UpdateServers` may move keys.
 - Shards with unchanged `Addr` are reused.
 - Removed shards are closed.
-- Dead server auto-eject/remove-failed-servers is not implemented in this phase.
+- Dead server auto-eject is available via:
+  - `WithRemoveFailedServers(true)`
+  - `WithServerFailureLimit(n)`
+  - `WithRetryTimeout(d)`
 
 ### Cluster APIs
 
 Context-aware path:
-- `GetWithContext`, `SetWithContext`, `DeleteWithContext`, `TouchWithContext`
+- `GetWithContext`, `GetsWithContext`, `GetMultiWithContext`, `SetWithContext`, `DeleteWithContext`, `TouchWithContext`, `CASWithContext`
 
 Fast path:
-- `Get`, `Set`, `Add`, `Replace`, `Append`, `Prepend`, `Delete`, `Touch`, `GetAndTouch`, `Incr`, `Decr`
+- `Get`, `Gets`, `GetMulti`, `Set`, `Add`, `Replace`, `CAS`, `Append`, `Prepend`, `Delete`, `Touch`, `GetAndTouch`, `Incr`, `Decr`
 - Explicit aliases: `GetNoContext`, `GetsNoContext`, `SetNoContext`, `AddNoContext`, `ReplaceNoContext`, `CASNoContext`, `AppendNoContext`, `PrependNoContext`, `DeleteNoContext`, `TouchNoContext`, `GetAndTouchNoContext`, `IncrNoContext`, `DecrNoContext`
 
 Management:

@@ -15,27 +15,29 @@ import (
 type fakeShard struct {
 	mu sync.Mutex
 
-	getCount                int
-	getsCount               int
-	setCount                int
-	addCount                int
-	replaceCount            int
-	appendCount             int
-	prependCount            int
-	deleteCount             int
-	touchCount              int
-	incrCount               int
-	decrCount               int
-	getWithContextCount     int
-	setWithContextCount     int
-	addWithContextCount     int
-	replaceWithContextCount int
-	appendWithContextCount  int
-	prependWithContextCount int
-	incrWithContextCount    int
-	decrWithContextCount    int
-	casCount                int
-	casWithContextCount     int
+	getCount                 int
+	getsCount                int
+	getMultiCount            int
+	getMultiWithContextCount int
+	setCount                 int
+	addCount                 int
+	replaceCount             int
+	appendCount              int
+	prependCount             int
+	deleteCount              int
+	touchCount               int
+	incrCount                int
+	decrCount                int
+	getWithContextCount      int
+	setWithContextCount      int
+	addWithContextCount      int
+	replaceWithContextCount  int
+	appendWithContextCount   int
+	prependWithContextCount  int
+	incrWithContextCount     int
+	decrWithContextCount     int
+	casCount                 int
+	casWithContextCount      int
 
 	getErr    error
 	setErr    error
@@ -69,6 +71,39 @@ func (s *fakeShard) Gets(key string) (*mcturbo.Item, error) {
 		return nil, s.getErr
 	}
 	return &mcturbo.Item{Value: append([]byte(nil), s.value...), CAS: 1}, nil
+}
+
+func (s *fakeShard) GetMultiWithContext(ctx context.Context, keys []string) (map[string]*mcturbo.Item, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.getMultiWithContextCount++
+	s.last = "GetMultiWithContext"
+	if s.ctxErr != nil {
+		return nil, s.ctxErr
+	}
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	out := make(map[string]*mcturbo.Item, len(keys))
+	for _, k := range keys {
+		out[k] = &mcturbo.Item{Value: append([]byte(nil), s.value...)}
+	}
+	return out, nil
+}
+
+func (s *fakeShard) GetMulti(keys []string) (map[string]*mcturbo.Item, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.getMultiCount++
+	s.last = "GetMultiNoContext"
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	out := make(map[string]*mcturbo.Item, len(keys))
+	for _, k := range keys {
+		out[k] = &mcturbo.Item{Value: append([]byte(nil), s.value...)}
+	}
+	return out, nil
 }
 
 func (s *fakeShard) Set(key string, value []byte, flags uint32, ttlSeconds int) error {
@@ -498,6 +533,63 @@ func TestClusterRoutingAndDelegation(t *testing.T) {
 	}
 	if target.addCount != 1 || target.replaceWithContextCount != 1 || target.appendCount != 1 || target.prependWithContextCount != 1 || target.casCount != 1 {
 		t.Fatalf("expected add/replace/append/prepend delegation on target")
+	}
+}
+
+func TestClusterGetMultiDelegation(t *testing.T) {
+	fakeByAddr := map[string]*fakeShard{}
+	factory := func(addr string, opts ...mcturbo.Option) (shardClient, error) {
+		s := &fakeShard{value: []byte("from-" + addr)}
+		fakeByAddr[addr] = s
+		return s, nil
+	}
+	servers := []Server{{Addr: "127.0.0.1:24001", Weight: 1}, {Addr: "127.0.0.1:24002", Weight: 1}}
+	c, err := NewCluster(servers, WithDistribution(DistributionModula), withTestFactory(factory))
+	if err != nil {
+		t.Fatalf("new cluster: %v", err)
+	}
+	defer c.Close()
+
+	st := c.loadState()
+	var k0, k1 string
+	for i := 0; i < 1000; i++ {
+		k := fmt.Sprintf("m%d", i)
+		idx := st.router.Pick(k)
+		if idx == 0 && k0 == "" {
+			k0 = k
+		}
+		if idx == 1 && k1 == "" {
+			k1 = k
+		}
+		if k0 != "" && k1 != "" {
+			break
+		}
+	}
+	if k0 == "" || k1 == "" {
+		t.Fatalf("failed to pick keys for both shards")
+	}
+
+	got, err := c.GetMulti([]string{k0, k1})
+	if err != nil {
+		t.Fatalf("GetMulti: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("unexpected item count: %d", len(got))
+	}
+	if fakeByAddr[servers[0].Addr].getMultiCount != 1 || fakeByAddr[servers[1].Addr].getMultiCount != 1 {
+		t.Fatalf("expected getmulti no-context to hit both shards once")
+	}
+
+	ctx := context.Background()
+	got, err = c.GetMultiWithContext(ctx, []string{k0, k1})
+	if err != nil {
+		t.Fatalf("GetMulti: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("unexpected item count: %d", len(got))
+	}
+	if fakeByAddr[servers[0].Addr].getMultiWithContextCount != 1 || fakeByAddr[servers[1].Addr].getMultiWithContextCount != 1 {
+		t.Fatalf("expected getmulti with context to hit both shards once")
 	}
 }
 
