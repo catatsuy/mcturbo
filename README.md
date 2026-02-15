@@ -1,24 +1,44 @@
 # mcturbo
 
 `mcturbo` is a memcached ASCII (text) protocol client for Go 1.26.
-Phase 1 provides a single-server client implementation.
 
-## Supported Commands
+It provides:
+- A single-server client (`mcturbo.Client`)
+- A distributed cluster client (`cluster.Cluster`)
 
-- `get`
-- `set`
-- `delete`
-- `touch`
+## Scope
 
-## Timeout Model
+- Protocol: memcached ASCII only
+- Supported commands: `get`, `set`, `delete`, `touch`
+- Not in scope: binary protocol, SASL, compression, serializer
 
-- Default APIs (`Get`, `Set`, `Delete`, `Touch`) do not require `context.Context` and are optimized for low latency.
-- Context-aware APIs are also available: `GetWithContext`, `SetWithContext`, `DeleteWithContext`, `TouchWithContext`.
-- For `*WithContext` APIs, `context` is the only source of truth for cancellation and deadlines.
-- `WithDefaultDeadline(d)` sets a fallback socket deadline used at round-trip time when no context deadline is present.
-- `WithMaxSlots(n)` limits per-worker concurrent in-flight operations (`n=0` means unlimited, default).
+## Single-Server Client
 
-## Usage
+### APIs
+
+Fast path (no context):
+- `Get(key string)`
+- `Set(key string, value []byte, ttlSeconds int)`
+- `Delete(key string)`
+- `Touch(key string, ttlSeconds int)`
+
+Context-aware path:
+- `GetWithContext(ctx context.Context, key string)`
+- `SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int)`
+- `DeleteWithContext(ctx context.Context, key string)`
+- `TouchWithContext(ctx context.Context, key string, ttlSeconds int)`
+
+Lifecycle:
+- `Close()`
+
+### Timeout and Cancellation
+
+- `*WithContext` methods use `context` as the source of truth for deadline/cancellation.
+- Fast-path methods do not take `context`.
+- `WithDefaultDeadline(d)` sets a fallback socket deadline per request.
+- `WithMaxSlots(n)` limits per-worker concurrency. `n=0` means unlimited.
+
+### Single-Server Example
 
 ```go
 package main
@@ -41,12 +61,13 @@ func main() {
 	}
 	defer c.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-
 	if err := c.Set("k1", []byte("value"), 10); err != nil {
 		log.Fatal(err)
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
 	v, err := c.GetWithContext(ctx, "k1")
 	if err != nil {
 		log.Fatal(err)
@@ -55,15 +76,107 @@ func main() {
 }
 ```
 
-## Tests
+## Cluster Client
 
-- Unit tests only:
+`cluster.Cluster` routes keys to shards and delegates operations to existing `mcturbo.Client` methods.
+
+### Routing Features
+
+- Distribution:
+  - `DistributionModula` (default)
+  - `DistributionConsistent` (Ketama-style)
+- Hash:
+  - `HashDefault` (default)
+  - `HashMD5`
+  - `HashCRC32`
+- Libketama compatibility:
+  - `WithLibketamaCompatible(true)` forces
+    - distribution = consistent
+    - hash = MD5
+    - weighted Ketama behavior
+
+### Important Defaults
+
+- Default distribution is `MODULA` (not Ketama).
+- Default hash is `DEFAULT`.
+- Default libketama mode is disabled.
+
+### Behavior Policy
+
+- No automatic failover to another server by default.
+- `UpdateServers` may move keys.
+- Shards with unchanged `Addr` are reused.
+- Removed shards are closed.
+- Dead server auto-eject/remove-failed-servers is not implemented in this phase.
+
+### Cluster APIs
+
+Context-aware path:
+- `GetWithContext`, `SetWithContext`, `DeleteWithContext`, `TouchWithContext`
+
+Fast path:
+- `Get`, `Set`, `Delete`, `Touch`
+- Explicit aliases: `GetNoContext`, `SetNoContext`, `DeleteNoContext`, `TouchNoContext`
+
+Management:
+- `UpdateServers([]Server)`
+- `Close()`
+
+### Cluster Example (Consistent + MD5)
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+	"time"
+
+	"github.com/catatsuy/mcturbo"
+	"github.com/catatsuy/mcturbo/cluster"
+)
+
+func main() {
+	c, err := cluster.NewCluster(
+		[]cluster.Server{
+			{Addr: "127.0.0.1:11211", Weight: 1},
+			{Addr: "127.0.0.1:11212", Weight: 1},
+		},
+		cluster.WithDistribution(cluster.DistributionConsistent),
+		cluster.WithHash(cluster.HashMD5),
+		cluster.WithBaseClientOptions(
+			mcturbo.WithWorkers(4),
+		),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer c.Close()
+
+	if err := c.SetNoContext("k1", []byte("value"), 10); err != nil {
+		log.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	v, err := c.GetWithContext(ctx, "k1")
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("value=%s", string(v))
+}
+```
+
+## Testing
+
+Unit tests:
 
 ```bash
 go test ./...
 ```
 
-- Integration tests (requires `memcached` binary):
+Integration tests (requires `memcached` command):
 
 ```bash
 go test -tags=integration ./...
