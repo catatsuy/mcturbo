@@ -9,7 +9,7 @@ It provides:
 ## Scope
 
 - Protocol: memcached ASCII only
-- Supported commands: `get`, `set`, `delete`, `touch`
+- Supported commands: `get`, `set`, `delete`, `touch`, `incr`, `decr`
 - Not in scope: binary protocol, SASL, compression, serializer
 
 ## Single-Server Client
@@ -21,12 +21,16 @@ Fast path (no context):
 - `Set(key string, value []byte, ttlSeconds int)`
 - `Delete(key string)`
 - `Touch(key string, ttlSeconds int)`
+- `Incr(key string, delta uint64)`
+- `Decr(key string, delta uint64)`
 
 Context-aware path:
 - `GetWithContext(ctx context.Context, key string)`
 - `SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int)`
 - `DeleteWithContext(ctx context.Context, key string)`
 - `TouchWithContext(ctx context.Context, key string, ttlSeconds int)`
+- `IncrWithContext(ctx context.Context, key string, delta uint64)`
+- `DecrWithContext(ctx context.Context, key string, delta uint64)`
 
 Lifecycle:
 - `Close()`
@@ -112,11 +116,11 @@ func main() {
 ### Cluster APIs
 
 Context-aware path:
-- `GetWithContext`, `SetWithContext`, `DeleteWithContext`, `TouchWithContext`
+- `GetWithContext`, `SetWithContext`, `DeleteWithContext`, `TouchWithContext`, `IncrWithContext`, `DecrWithContext`
 
 Fast path:
-- `Get`, `Set`, `Delete`, `Touch`
-- Explicit aliases: `GetNoContext`, `SetNoContext`, `DeleteNoContext`, `TouchNoContext`
+- `Get`, `Set`, `Delete`, `Touch`, `Incr`, `Decr`
+- Explicit aliases: `GetNoContext`, `SetNoContext`, `DeleteNoContext`, `TouchNoContext`, `IncrNoContext`, `DecrNoContext`
 
 Management:
 - `UpdateServers([]Server)`

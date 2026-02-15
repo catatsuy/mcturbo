@@ -133,6 +133,42 @@ func TestClientBasicCommands(t *testing.T) {
 					_, _ = bw.WriteString("NOT_FOUND\r\n")
 				}
 				_ = bw.Flush()
+			case "incr", "decr":
+				if len(parts) != 3 {
+					return
+				}
+				delta, err := strconv.ParseUint(parts[2], 10, 64)
+				if err != nil {
+					_, _ = bw.WriteString("CLIENT_ERROR bad command line format\r\n")
+					_ = bw.Flush()
+					continue
+				}
+				mu.Lock()
+				v, ok := data[parts[1]]
+				if !ok {
+					mu.Unlock()
+					_, _ = bw.WriteString("NOT_FOUND\r\n")
+					_ = bw.Flush()
+					continue
+				}
+				n, err := strconv.ParseUint(string(v), 10, 64)
+				if err != nil {
+					mu.Unlock()
+					_, _ = bw.WriteString("CLIENT_ERROR cannot increment or decrement non-numeric value\r\n")
+					_ = bw.Flush()
+					continue
+				}
+				if parts[0] == "incr" {
+					n += delta
+				} else if delta >= n {
+					n = 0
+				} else {
+					n -= delta
+				}
+				data[parts[1]] = []byte(strconv.FormatUint(n, 10))
+				mu.Unlock()
+				_, _ = bw.WriteString(strconv.FormatUint(n, 10) + "\r\n")
+				_ = bw.Flush()
 			default:
 				return
 			}
@@ -165,6 +201,39 @@ func TestClientBasicCommands(t *testing.T) {
 	_, err = c.Get("k1")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	if err := c.Set("counter", []byte("10"), 10); err != nil {
+		t.Fatalf("set counter: %v", err)
+	}
+	n, err := c.Incr("counter", 7)
+	if err != nil {
+		t.Fatalf("incr: %v", err)
+	}
+	if n != 17 {
+		t.Fatalf("incr value mismatch: %d", n)
+	}
+	n, err = c.Decr("counter", 20)
+	if err != nil {
+		t.Fatalf("decr: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("decr value mismatch: %d", n)
+	}
+	ctx := context.Background()
+	n, err = c.IncrWithContext(ctx, "counter", 5)
+	if err != nil {
+		t.Fatalf("incr with context: %v", err)
+	}
+	if n != 5 {
+		t.Fatalf("incr with context value mismatch: %d", n)
+	}
+	n, err = c.DecrWithContext(ctx, "counter", 2)
+	if err != nil {
+		t.Fatalf("decr with context: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("decr with context value mismatch: %d", n)
 	}
 }
 

@@ -13,12 +13,16 @@ import (
 type fakeShard struct {
 	mu sync.Mutex
 
-	getCount            int
-	setCount            int
-	deleteCount         int
-	touchCount          int
-	getWithContextCount int
-	setWithContextCount int
+	getCount             int
+	setCount             int
+	deleteCount          int
+	touchCount           int
+	incrCount            int
+	decrCount            int
+	getWithContextCount  int
+	setWithContextCount  int
+	incrWithContextCount int
+	decrWithContextCount int
 
 	getErr    error
 	setErr    error
@@ -77,6 +81,31 @@ func (s *fakeShard) Touch(key string, ttlSeconds int) error {
 	return nil
 }
 
+func (s *fakeShard) Incr(key string, delta uint64) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.incrCount++
+	s.last = fmt.Sprintf("Incr:%s:%d", key, delta)
+	if s.setErr != nil {
+		return 0, s.setErr
+	}
+	return delta + 1, nil
+}
+
+func (s *fakeShard) Decr(key string, delta uint64) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.decrCount++
+	s.last = fmt.Sprintf("Decr:%s:%d", key, delta)
+	if s.setErr != nil {
+		return 0, s.setErr
+	}
+	if delta == 0 {
+		return 0, nil
+	}
+	return delta - 1, nil
+}
+
 func (s *fakeShard) GetWithContext(ctx context.Context, key string) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -98,6 +127,31 @@ func (s *fakeShard) SetWithContext(ctx context.Context, key string, value []byte
 	}
 	s.value = append([]byte(nil), value...)
 	return nil
+}
+
+func (s *fakeShard) IncrWithContext(ctx context.Context, key string, delta uint64) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.incrWithContextCount++
+	s.last = fmt.Sprintf("IncrWithContext:%s:%d", key, delta)
+	if s.ctxErr != nil {
+		return 0, s.ctxErr
+	}
+	return delta + 1, nil
+}
+
+func (s *fakeShard) DecrWithContext(ctx context.Context, key string, delta uint64) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.decrWithContextCount++
+	s.last = fmt.Sprintf("DecrWithContext:%s:%d", key, delta)
+	if s.ctxErr != nil {
+		return 0, s.ctxErr
+	}
+	if delta == 0 {
+		return 0, nil
+	}
+	return delta - 1, nil
 }
 
 func (s *fakeShard) DeleteWithContext(ctx context.Context, key string) error {
@@ -230,6 +284,15 @@ func TestClusterRoutingAndDelegation(t *testing.T) {
 	}
 	if target.setCount != 1 || target.setWithContextCount != 1 {
 		t.Fatalf("expected both set paths on target: set=%d setCtx=%d", target.setCount, target.setWithContextCount)
+	}
+	if _, err := c.IncrNoContext(key, 3); err != nil {
+		t.Fatalf("IncrNoContext: %v", err)
+	}
+	if _, err := c.DecrWithContext(ctx, key, 1); err != nil {
+		t.Fatalf("DecrWithContext: %v", err)
+	}
+	if target.incrCount != 1 || target.decrWithContextCount != 1 {
+		t.Fatalf("expected incr/decr delegation on target: incr=%d decrCtx=%d", target.incrCount, target.decrWithContextCount)
 	}
 }
 

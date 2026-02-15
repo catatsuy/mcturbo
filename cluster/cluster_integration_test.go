@@ -139,6 +139,27 @@ func TestIntegrationConsistentSetGet(t *testing.T) {
 	if _, err := c.GetNoContext("cluster:consistent:nc"); err != nil {
 		t.Fatalf("get no context: %v", err)
 	}
+
+	if err := c.SetNoContext("cluster:consistent:counter", []byte("10"), 5); err != nil {
+		t.Fatalf("set counter: %v", err)
+	}
+	n, err := c.IncrNoContext("cluster:consistent:counter", 2)
+	if err != nil {
+		t.Fatalf("incr no context: %v", err)
+	}
+	if n != 12 {
+		t.Fatalf("unexpected incr value: %d", n)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	n, err = c.DecrWithContext(ctx, "cluster:consistent:counter", 3)
+	if err != nil {
+		t.Fatalf("decr with context: %v", err)
+	}
+	if n != 9 {
+		t.Fatalf("unexpected decr value: %d", n)
+	}
 }
 
 func TestIntegrationPickDeterministic(t *testing.T) {

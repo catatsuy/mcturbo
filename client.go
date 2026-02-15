@@ -176,7 +176,7 @@ func (c *Client) Get(key string) ([]byte, error) {
 	if err := validateKey(key); err != nil {
 		return nil, err
 	}
-	return c.doFast(opGet, key, nil, 0)
+	return c.doFast(opGet, key, nil, 0, 0)
 }
 
 // Set stores value for key with ttlSeconds.
@@ -187,7 +187,7 @@ func (c *Client) Set(key string, value []byte, ttlSeconds int) error {
 	if ttlSeconds < 0 {
 		return errors.New("memcache: ttlSeconds must be >= 0")
 	}
-	_, err := c.doFast(opSet, key, value, ttlSeconds)
+	_, err := c.doFast(opSet, key, value, ttlSeconds, 0)
 	return err
 }
 
@@ -196,7 +196,7 @@ func (c *Client) Delete(key string) error {
 	if err := validateKey(key); err != nil {
 		return err
 	}
-	_, err := c.doFast(opDelete, key, nil, 0)
+	_, err := c.doFast(opDelete, key, nil, 0, 0)
 	return err
 }
 
@@ -208,8 +208,32 @@ func (c *Client) Touch(key string, ttlSeconds int) error {
 	if ttlSeconds < 0 {
 		return errors.New("memcache: ttlSeconds must be >= 0")
 	}
-	_, err := c.doFast(opTouch, key, nil, ttlSeconds)
+	_, err := c.doFast(opTouch, key, nil, ttlSeconds, 0)
 	return err
+}
+
+// Incr increments a numeric value by delta and returns the new value.
+func (c *Client) Incr(key string, delta uint64) (uint64, error) {
+	if err := validateKey(key); err != nil {
+		return 0, err
+	}
+	v, err := c.doFast(opIncr, key, nil, 0, delta)
+	if err != nil {
+		return 0, err
+	}
+	return parseCounterValue(v)
+}
+
+// Decr decrements a numeric value by delta and returns the new value.
+func (c *Client) Decr(key string, delta uint64) (uint64, error) {
+	if err := validateKey(key); err != nil {
+		return 0, err
+	}
+	v, err := c.doFast(opDecr, key, nil, 0, delta)
+	if err != nil {
+		return 0, err
+	}
+	return parseCounterValue(v)
 }
 
 // GetWithContext returns the value for key using ctx for cancellation/deadline.
@@ -220,7 +244,7 @@ func (c *Client) GetWithContext(ctx context.Context, key string) ([]byte, error)
 	if ctx == nil {
 		return nil, errors.New("memcache: nil context")
 	}
-	return c.doWithContext(ctx, opGet, key, nil, 0)
+	return c.doWithContext(ctx, opGet, key, nil, 0, 0)
 }
 
 // SetWithContext stores value for key with ttlSeconds using ctx.
@@ -234,7 +258,7 @@ func (c *Client) SetWithContext(ctx context.Context, key string, value []byte, t
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opSet, key, value, ttlSeconds)
+	_, err := c.doWithContext(ctx, opSet, key, value, ttlSeconds, 0)
 	return err
 }
 
@@ -246,7 +270,7 @@ func (c *Client) DeleteWithContext(ctx context.Context, key string) error {
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opDelete, key, nil, 0)
+	_, err := c.doWithContext(ctx, opDelete, key, nil, 0, 0)
 	return err
 }
 
@@ -261,8 +285,38 @@ func (c *Client) TouchWithContext(ctx context.Context, key string, ttlSeconds in
 	if ctx == nil {
 		return errors.New("memcache: nil context")
 	}
-	_, err := c.doWithContext(ctx, opTouch, key, nil, ttlSeconds)
+	_, err := c.doWithContext(ctx, opTouch, key, nil, ttlSeconds, 0)
 	return err
+}
+
+// IncrWithContext increments a numeric value by delta and returns the new value.
+func (c *Client) IncrWithContext(ctx context.Context, key string, delta uint64) (uint64, error) {
+	if err := validateKey(key); err != nil {
+		return 0, err
+	}
+	if ctx == nil {
+		return 0, errors.New("memcache: nil context")
+	}
+	v, err := c.doWithContext(ctx, opIncr, key, nil, 0, delta)
+	if err != nil {
+		return 0, err
+	}
+	return parseCounterValue(v)
+}
+
+// DecrWithContext decrements a numeric value by delta and returns the new value.
+func (c *Client) DecrWithContext(ctx context.Context, key string, delta uint64) (uint64, error) {
+	if err := validateKey(key); err != nil {
+		return 0, err
+	}
+	if ctx == nil {
+		return 0, errors.New("memcache: nil context")
+	}
+	v, err := c.doWithContext(ctx, opDecr, key, nil, 0, delta)
+	if err != nil {
+		return 0, err
+	}
+	return parseCounterValue(v)
 }
 
 // Close closes the client and all internal connections.
@@ -277,15 +331,15 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func (c *Client) doFast(op opType, key string, value []byte, ttl int) ([]byte, error) {
+func (c *Client) doFast(op opType, key string, value []byte, ttl int, delta uint64) ([]byte, error) {
 	if c.closed.Load() {
 		return nil, ErrClosed
 	}
 	w := c.pickWorker(key)
-	return w.roundTripFast(request{op: op, key: key, value: value, ttl: ttl})
+	return w.roundTripFast(request{op: op, key: key, value: value, ttl: ttl, delta: delta})
 }
 
-func (c *Client) doWithContext(ctx context.Context, op opType, key string, value []byte, ttl int) ([]byte, error) {
+func (c *Client) doWithContext(ctx context.Context, op opType, key string, value []byte, ttl int, delta uint64) ([]byte, error) {
 	if c.closed.Load() {
 		return nil, ErrClosed
 	}
@@ -293,7 +347,7 @@ func (c *Client) doWithContext(ctx context.Context, op opType, key string, value
 		return nil, err
 	}
 	w := c.pickWorker(key)
-	v, err := w.roundTripWithContext(ctx, request{op: op, key: key, value: value, ttl: ttl})
+	v, err := w.roundTripWithContext(ctx, request{op: op, key: key, value: value, ttl: ttl, delta: delta})
 	if err != nil {
 		return nil, err
 	}
@@ -325,6 +379,8 @@ const (
 	opSet
 	opDelete
 	opTouch
+	opIncr
+	opDecr
 )
 
 type request struct {
@@ -332,6 +388,7 @@ type request struct {
 	key   string
 	value []byte
 	ttl   int
+	delta uint64
 }
 
 type workerConn struct {
@@ -621,6 +678,36 @@ func writeRequest(bw *bufio.Writer, req request) error {
 		}
 		_, err := bw.WriteString("\r\n")
 		return err
+	case opIncr:
+		if _, err := bw.WriteString("incr "); err != nil {
+			return err
+		}
+		if _, err := bw.WriteString(req.key); err != nil {
+			return err
+		}
+		if _, err := bw.WriteString(" "); err != nil {
+			return err
+		}
+		if err := writeUint64Decimal(bw, req.delta); err != nil {
+			return err
+		}
+		_, err := bw.WriteString("\r\n")
+		return err
+	case opDecr:
+		if _, err := bw.WriteString("decr "); err != nil {
+			return err
+		}
+		if _, err := bw.WriteString(req.key); err != nil {
+			return err
+		}
+		if _, err := bw.WriteString(" "); err != nil {
+			return err
+		}
+		if err := writeUint64Decimal(bw, req.delta); err != nil {
+			return err
+		}
+		_, err := bw.WriteString("\r\n")
+		return err
 	default:
 		return errProtocol
 	}
@@ -636,6 +723,8 @@ func readResponse(br *bufio.Reader, req request) ([]byte, error) {
 		return nil, parseDeleteResponse(br)
 	case opTouch:
 		return nil, parseTouchResponse(br)
+	case opIncr, opDecr:
+		return parseCounterResponse(br)
 	default:
 		return nil, errProtocol
 	}
@@ -742,6 +831,26 @@ func parseTouchResponse(br *bufio.Reader) error {
 	}
 }
 
+func parseCounterResponse(br *bufio.Reader) ([]byte, error) {
+	line, err := readLine(br)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case bytes.Equal(line, []byte("NOT_FOUND")):
+		return nil, ErrNotFound
+	case bytes.Equal(line, []byte("ERROR")):
+		return nil, errProtocol
+	case bytes.HasPrefix(line, []byte("CLIENT_ERROR ")) || bytes.HasPrefix(line, []byte("SERVER_ERROR ")):
+		return nil, errors.New("memcache: " + string(line))
+	default:
+		if _, ok := parseUint64(line); !ok {
+			return nil, fmt.Errorf("%w: unexpected counter response %q", errProtocol, line)
+		}
+		return append([]byte(nil), line...), nil
+	}
+}
+
 func readLine(br *bufio.Reader) ([]byte, error) {
 	line, err := br.ReadSlice('\n')
 	if err != nil {
@@ -821,6 +930,52 @@ func parsePositiveInt(b []byte) (int, bool) {
 		}
 	}
 	return n, true
+}
+
+func parseUint64(b []byte) (uint64, bool) {
+	if len(b) == 0 {
+		return 0, false
+	}
+	var n uint64
+	for i := range b {
+		c := b[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		next := n*10 + uint64(c-'0')
+		if next < n {
+			return 0, false
+		}
+		n = next
+	}
+	return n, true
+}
+
+func parseCounterValue(v []byte) (uint64, error) {
+	n, ok := parseUint64(v)
+	if !ok {
+		return 0, errProtocol
+	}
+	return n, nil
+}
+
+func writeUint64Decimal(bw *bufio.Writer, n uint64) error {
+	if n == 0 {
+		return bw.WriteByte('0')
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + (n % 10))
+		n /= 10
+	}
+	for ; i < len(buf); i++ {
+		if err := bw.WriteByte(buf[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateKey(key string) error {

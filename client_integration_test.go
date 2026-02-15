@@ -138,3 +138,36 @@ func TestIntegrationContextDeadline(t *testing.T) {
 		t.Fatalf("expected deadline exceeded, got %v", err)
 	}
 }
+
+func TestIntegrationIncrDecr(t *testing.T) {
+	c := newIntegrationClient(t)
+	defer c.Close()
+
+	if err := c.Set("int:counter", []byte("10"), 10); err != nil {
+		t.Fatalf("set counter: %v", err)
+	}
+	n, err := c.Incr("int:counter", 5)
+	if err != nil {
+		t.Fatalf("incr: %v", err)
+	}
+	if n != 15 {
+		t.Fatalf("unexpected incr value: %d", n)
+	}
+	n, err = c.Decr("int:counter", 4)
+	if err != nil {
+		t.Fatalf("decr: %v", err)
+	}
+	if n != 11 {
+		t.Fatalf("unexpected decr value: %d", n)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	n, err = c.IncrWithContext(ctx, "int:counter", 1)
+	if err != nil {
+		t.Fatalf("incr with context: %v", err)
+	}
+	if n != 12 {
+		t.Fatalf("unexpected incr with context value: %d", n)
+	}
+}
