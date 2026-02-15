@@ -18,9 +18,9 @@ It provides:
 
 Fast path (no context):
 - `Get(key string)`
-- `Set(key string, value []byte, ttlSeconds int)`
-- `Add(key string, value []byte, ttlSeconds int)`
-- `Replace(key string, value []byte, ttlSeconds int)`
+- `Set(key string, value []byte, flags uint32, ttlSeconds int)`
+- `Add(key string, value []byte, flags uint32, ttlSeconds int)`
+- `Replace(key string, value []byte, flags uint32, ttlSeconds int)`
 - `Append(key string, value []byte)`
 - `Prepend(key string, value []byte)`
 - `Delete(key string)`
@@ -34,9 +34,9 @@ Fast path (no context):
 Context-aware path:
 - `GetWithContext(ctx context.Context, key string)`
 - `GetMulti(ctx context.Context, keys []string)`
-- `SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int)`
-- `AddWithContext(ctx context.Context, key string, value []byte, ttlSeconds int)`
-- `ReplaceWithContext(ctx context.Context, key string, value []byte, ttlSeconds int)`
+- `SetWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
+- `AddWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
+- `ReplaceWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int)`
 - `AppendWithContext(ctx context.Context, key string, value []byte)`
 - `PrependWithContext(ctx context.Context, key string, value []byte)`
 - `DeleteWithContext(ctx context.Context, key string)`
@@ -80,7 +80,7 @@ func main() {
 	}
 	defer c.Close()
 
-	if err := c.Set("k1", []byte("value"), 10); err != nil {
+	if err := c.Set("k1", []byte("value"), 0, 10); err != nil {
 		log.Fatal(err)
 	}
 
@@ -172,7 +172,7 @@ func main() {
 	}
 	defer c.Close()
 
-	if err := c.SetNoContext("k1", []byte("value"), 10); err != nil {
+	if err := c.SetNoContext("k1", []byte("value"), 0, 10); err != nil {
 		log.Fatal(err)
 	}
 

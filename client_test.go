@@ -252,16 +252,16 @@ func TestClientBasicCommands(t *testing.T) {
 	}
 	defer c.Close()
 
-	if err := c.Set("k1", []byte("value-1"), 10); err != nil {
+	if err := c.Set("k1", []byte("value-1"), 0, 10); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	if err := c.Add("k2", []byte("v2"), 10); err != nil {
+	if err := c.Add("k2", []byte("v2"), 0, 10); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if err := c.Add("k2", []byte("x"), 10); !errors.Is(err, ErrNotStored) {
+	if err := c.Add("k2", []byte("x"), 0, 10); !errors.Is(err, ErrNotStored) {
 		t.Fatalf("second add should return ErrNotStored: %v", err)
 	}
-	if err := c.Replace("k2", []byte("r2"), 10); err != nil {
+	if err := c.Replace("k2", []byte("r2"), 0, 10); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
 	if err := c.Append("k2", []byte("A")); err != nil {
@@ -299,7 +299,7 @@ func TestClientBasicCommands(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 
-	if err := c.Set("counter", []byte("10"), 10); err != nil {
+	if err := c.Set("counter", []byte("10"), 0, 10); err != nil {
 		t.Fatalf("set counter: %v", err)
 	}
 	n, err := c.Incr("counter", 7)

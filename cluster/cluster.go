@@ -24,9 +24,9 @@ type Server struct {
 
 type shardClient interface {
 	Get(key string) (*mcturbo.Item, error)
-	Set(key string, value []byte, ttlSeconds int) error
-	Add(key string, value []byte, ttlSeconds int) error
-	Replace(key string, value []byte, ttlSeconds int) error
+	Set(key string, value []byte, flags uint32, ttlSeconds int) error
+	Add(key string, value []byte, flags uint32, ttlSeconds int) error
+	Replace(key string, value []byte, flags uint32, ttlSeconds int) error
 	Append(key string, value []byte) error
 	Prepend(key string, value []byte) error
 	Delete(key string) error
@@ -35,9 +35,9 @@ type shardClient interface {
 	Incr(key string, delta uint64) (uint64, error)
 	Decr(key string, delta uint64) (uint64, error)
 	GetWithContext(ctx context.Context, key string) (*mcturbo.Item, error)
-	SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error
-	AddWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error
-	ReplaceWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error
+	SetWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error
+	AddWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error
+	ReplaceWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error
 	AppendWithContext(ctx context.Context, key string, value []byte) error
 	PrependWithContext(ctx context.Context, key string, value []byte) error
 	DeleteWithContext(ctx context.Context, key string) error
@@ -105,31 +105,31 @@ func (c *Cluster) Get(key string) (*mcturbo.Item, error) {
 	return shard.Get(key)
 }
 
-// Set stores value for key with ttlSeconds.
-func (c *Cluster) Set(key string, value []byte, ttlSeconds int) error {
+// Set stores value for key with flags and ttlSeconds.
+func (c *Cluster) Set(key string, value []byte, flags uint32, ttlSeconds int) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
 		return err
 	}
-	return shard.Set(key, value, ttlSeconds)
+	return shard.Set(key, value, flags, ttlSeconds)
 }
 
 // Add stores value for key only if key does not exist.
-func (c *Cluster) Add(key string, value []byte, ttlSeconds int) error {
+func (c *Cluster) Add(key string, value []byte, flags uint32, ttlSeconds int) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
 		return err
 	}
-	return shard.Add(key, value, ttlSeconds)
+	return shard.Add(key, value, flags, ttlSeconds)
 }
 
 // Replace stores value for key only if key already exists.
-func (c *Cluster) Replace(key string, value []byte, ttlSeconds int) error {
+func (c *Cluster) Replace(key string, value []byte, flags uint32, ttlSeconds int) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
 		return err
 	}
-	return shard.Replace(key, value, ttlSeconds)
+	return shard.Replace(key, value, flags, ttlSeconds)
 }
 
 // Append appends value to existing key value.
@@ -204,31 +204,31 @@ func (c *Cluster) GetWithContext(ctx context.Context, key string) (*mcturbo.Item
 	return shard.GetWithContext(ctx, key)
 }
 
-// SetWithContext stores value for key with ttlSeconds using ctx.
-func (c *Cluster) SetWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
+// SetWithContext stores value for key with flags and ttlSeconds using ctx.
+func (c *Cluster) SetWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
 		return err
 	}
-	return shard.SetWithContext(ctx, key, value, ttlSeconds)
+	return shard.SetWithContext(ctx, key, value, flags, ttlSeconds)
 }
 
 // AddWithContext stores value for key only if key does not exist.
-func (c *Cluster) AddWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
+func (c *Cluster) AddWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
 		return err
 	}
-	return shard.AddWithContext(ctx, key, value, ttlSeconds)
+	return shard.AddWithContext(ctx, key, value, flags, ttlSeconds)
 }
 
 // ReplaceWithContext stores value for key only if key already exists.
-func (c *Cluster) ReplaceWithContext(ctx context.Context, key string, value []byte, ttlSeconds int) error {
+func (c *Cluster) ReplaceWithContext(ctx context.Context, key string, value []byte, flags uint32, ttlSeconds int) error {
 	shard, err := c.pickShard(key)
 	if err != nil {
 		return err
 	}
-	return shard.ReplaceWithContext(ctx, key, value, ttlSeconds)
+	return shard.ReplaceWithContext(ctx, key, value, flags, ttlSeconds)
 }
 
 // AppendWithContext appends value to existing key value.
@@ -300,18 +300,18 @@ func (c *Cluster) GetNoContext(key string) (*mcturbo.Item, error) {
 }
 
 // SetNoContext is an explicit no-context alias of Set.
-func (c *Cluster) SetNoContext(key string, value []byte, ttlSeconds int) error {
-	return c.Set(key, value, ttlSeconds)
+func (c *Cluster) SetNoContext(key string, value []byte, flags uint32, ttlSeconds int) error {
+	return c.Set(key, value, flags, ttlSeconds)
 }
 
 // AddNoContext is an explicit no-context alias of Add.
-func (c *Cluster) AddNoContext(key string, value []byte, ttlSeconds int) error {
-	return c.Add(key, value, ttlSeconds)
+func (c *Cluster) AddNoContext(key string, value []byte, flags uint32, ttlSeconds int) error {
+	return c.Add(key, value, flags, ttlSeconds)
 }
 
 // ReplaceNoContext is an explicit no-context alias of Replace.
-func (c *Cluster) ReplaceNoContext(key string, value []byte, ttlSeconds int) error {
-	return c.Replace(key, value, ttlSeconds)
+func (c *Cluster) ReplaceNoContext(key string, value []byte, flags uint32, ttlSeconds int) error {
+	return c.Replace(key, value, flags, ttlSeconds)
 }
 
 // AppendNoContext is an explicit no-context alias of Append.
