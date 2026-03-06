@@ -22,7 +22,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.0"
+          go-version: "1.26.1"
           cache: true
       - name: Test root module
         run: go test ./... -count=1
@@ -35,7 +35,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.0"
+          go-version: "1.26.1"
           cache: true
       - name: Install memcached
         run: |
@@ -52,7 +52,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.0"
+          go-version: "1.26.1"
           cache: true
       - name: Test benchmark module
         working-directory: benchmark
